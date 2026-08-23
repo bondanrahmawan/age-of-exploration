@@ -3,7 +3,8 @@
 `docs/game-design.md` is the repository's development contract. Section 34 wins
 over broader prose. This document records the preserved WP0 foundation. WP1's
 versioned extension and authored tuning are recorded separately in
-`docs/wp1-navigation.md`; WP2 is the next gate.
+`docs/wp1-navigation.md`; WP2's versioned survival extension is recorded in
+`docs/wp2-survival.md`. WP3 is the next gate.
 
 ## Runtime and boundaries
 

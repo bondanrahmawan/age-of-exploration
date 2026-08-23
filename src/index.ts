@@ -8,8 +8,11 @@ export { canonicalize, hashCanonical, sha256Hex } from "./canonical.js";
 export {
   advanceDay,
   applyCommand,
+  createCapeVerdePortFixtureState,
   createInitialState,
   createNavigationState,
+  createSurvivalState,
+  executeSurvivalCommand,
   getPlayerView,
 } from "./engine.js";
 export {
@@ -26,6 +29,13 @@ export {
   hashState,
   serializeSave,
 } from "./save.js";
+export {
+  SURVIVAL_TUNING,
+  batchTotalKg,
+  capeVerdePurchaseCost,
+  holdUsedKg,
+  lisbonOutfittingCost,
+} from "./survival.js";
 export {
   CONDITION_MAX_BPS,
   MNAUTICAL_MILES_PER_NAUTICAL_MILE,
@@ -46,6 +56,14 @@ export {
   SAILING_POLICIES,
   SAVE_FORMAT,
   STATE_FORMAT,
+  STORE_KINDS,
+  SURVIVAL_LOCATIONS,
+  SURVIVAL_REPLAY_FORMAT,
+  SURVIVAL_SAVE_FORMAT,
+  SURVIVAL_STATE_FORMAT,
+  SURVIVAL_WARNING_CODES,
+  SHIP_COMPONENTS,
+  EXPEDITION_INTENTS,
   WEATHER_KINDS,
 } from "./types.js";
 export {
@@ -59,6 +77,7 @@ export {
 } from "./world.js";
 export type {
   AdvanceDayCommand,
+  CapeVerdePortFixtureConfig,
   CanonicalLogEntry,
   CommandLogEntry,
   DailyEnvironment,
@@ -98,7 +117,24 @@ export type {
   ShipState,
   SimulationCommand,
   SimulationState,
+  StoreBatch,
+  StoreKind,
   StoresState,
+  SurvivalActionLogEntry,
+  SurvivalActionResult,
+  SurvivalCommandResult,
+  SurvivalDayActivityResult,
+  SurvivalDayLogEntry,
+  SurvivalInitialStateConfig,
+  SurvivalInterrupt,
+  SurvivalLocation,
+  SurvivalOnlyCommand,
+  SurvivalPlayerView,
+  SurvivalSimulationState,
+  SurvivalState,
+  SurvivalStatus,
+  SurvivalWarning,
+  SurvivalWarningCode,
   UncertaintyRadiiMnm,
   WeatherKind,
   WeatherState,

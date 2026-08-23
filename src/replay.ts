@@ -6,6 +6,8 @@ import {
   NAVIGATION_REPLAY_FORMAT,
   NAVIGATION_STATE_FORMAT,
   REPLAY_FORMAT,
+  SURVIVAL_REPLAY_FORMAT,
+  SURVIVAL_STATE_FORMAT,
   type EnvironmentProvider,
   type ReplayRecord,
   type SimulationCommand,
@@ -29,8 +31,14 @@ function assertReplayRecord(value: unknown): asserts value is ReplayRecord {
   if (actualKeys !== expectedKeys) {
     throw new ReplayError("replay record has missing or unknown fields");
   }
-  if (record["format"] !== REPLAY_FORMAT && record["format"] !== NAVIGATION_REPLAY_FORMAT) {
-    throw new ReplayError(`replay format must be ${REPLAY_FORMAT} or ${NAVIGATION_REPLAY_FORMAT}`);
+  if (
+    record["format"] !== REPLAY_FORMAT
+    && record["format"] !== NAVIGATION_REPLAY_FORMAT
+    && record["format"] !== SURVIVAL_REPLAY_FORMAT
+  ) {
+    throw new ReplayError(
+      `replay format must be ${REPLAY_FORMAT}, ${NAVIGATION_REPLAY_FORMAT}, or ${SURVIVAL_REPLAY_FORMAT}`,
+    );
   }
   if (typeof record["contentVersion"] !== "string" || record["contentVersion"].length === 0) {
     throw new ReplayError("replay contentVersion must be a non-empty string");
@@ -66,12 +74,20 @@ export function createReplay(
   const commandCopies: SimulationCommand[] = [];
   for (const command of commands) {
     assertSimulationCommand(command);
+    const survivalOnly = ![
+      "set_heading", "set_sailing_policy", "set_ration_policy", "advance_day",
+    ].includes(command.type);
+    if (startingState.format !== SURVIVAL_STATE_FORMAT && survivalOnly) {
+      throw new ReplayError("WP2 survival commands require replay/state format v3");
+    }
     commandCopies.push(copyCommand(command));
   }
   return deepFreeze({
-    format: startingState.format === NAVIGATION_STATE_FORMAT
-      ? NAVIGATION_REPLAY_FORMAT
-      : REPLAY_FORMAT,
+    format: startingState.format === SURVIVAL_STATE_FORMAT
+      ? SURVIVAL_REPLAY_FORMAT
+      : startingState.format === NAVIGATION_STATE_FORMAT
+        ? NAVIGATION_REPLAY_FORMAT
+        : REPLAY_FORMAT,
     contentVersion: startingState.contentVersion,
     runSeed: startingState.runSeed,
     startingStateHash: hashState(startingState),
@@ -95,10 +111,12 @@ export function replay(
   if (record.startingStateHash !== hashState(startingState)) {
     throw new ReplayError("replay startingStateHash does not match the starting state");
   }
-  if (
-    (record.format === NAVIGATION_REPLAY_FORMAT)
-    !== (startingState.format === NAVIGATION_STATE_FORMAT)
-  ) {
+  const formatMatches = (record.format === REPLAY_FORMAT
+      && startingState.format !== NAVIGATION_STATE_FORMAT
+      && startingState.format !== SURVIVAL_STATE_FORMAT)
+    || (record.format === NAVIGATION_REPLAY_FORMAT && startingState.format === NAVIGATION_STATE_FORMAT)
+    || (record.format === SURVIVAL_REPLAY_FORMAT && startingState.format === SURVIVAL_STATE_FORMAT);
+  if (!formatMatches) {
     throw new ReplayError("replay format version does not match the starting state version");
   }
 

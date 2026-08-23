@@ -1,9 +1,12 @@
 export const STATE_FORMAT = "age-of-exploration-state-v1" as const;
 export const NAVIGATION_STATE_FORMAT = "age-of-exploration-state-v2" as const;
+export const SURVIVAL_STATE_FORMAT = "age-of-exploration-state-v3" as const;
 export const SAVE_FORMAT = "age-of-exploration-save-v1" as const;
 export const NAVIGATION_SAVE_FORMAT = "age-of-exploration-save-v2" as const;
+export const SURVIVAL_SAVE_FORMAT = "age-of-exploration-save-v3" as const;
 export const REPLAY_FORMAT = "age-of-exploration-replay-v1" as const;
 export const NAVIGATION_REPLAY_FORMAT = "age-of-exploration-replay-v2" as const;
+export const SURVIVAL_REPLAY_FORMAT = "age-of-exploration-replay-v3" as const;
 export const PRNG_ALGORITHM = "xoshiro128ss-v1" as const;
 
 export const HEADINGS = [
@@ -46,6 +49,22 @@ export const NAVIGATION_FACT_STATUSES = [
   "confirmed",
   "disproved",
 ] as const;
+export const STORE_KINDS = ["water", "provisions", "repair_stores", "medicine"] as const;
+export const SHIP_COMPONENTS = ["hull", "mast", "sails", "rudder"] as const;
+export const SURVIVAL_LOCATIONS = ["lisbon", "at_sea", "cape_verde"] as const;
+export const EXPEDITION_INTENTS = [
+  "pursue_objective",
+  "return_to_lisbon",
+  "objective_abandoned",
+] as const;
+export const SURVIVAL_WARNING_CODES = [
+  "zero_water",
+  "zero_provisions",
+  "sour_water",
+  "provisions_spoiling",
+  "hull_danger",
+  "crew_health_danger",
+] as const;
 
 export const DAY_PHASE_ORDER = [
   "lock_orders",
@@ -65,6 +84,11 @@ export type RationPolicy = (typeof RATION_POLICIES)[number];
 export type WeatherKind = (typeof WEATHER_KINDS)[number];
 export type NavigationFactType = (typeof NAVIGATION_FACT_TYPES)[number];
 export type NavigationFactStatus = (typeof NAVIGATION_FACT_STATUSES)[number];
+export type StoreKind = (typeof STORE_KINDS)[number];
+export type ShipComponent = (typeof SHIP_COMPONENTS)[number];
+export type SurvivalLocation = (typeof SURVIVAL_LOCATIONS)[number];
+export type ExpeditionIntent = (typeof EXPEDITION_INTENTS)[number];
+export type SurvivalWarningCode = (typeof SURVIVAL_WARNING_CODES)[number];
 export type DayPhase = (typeof DAY_PHASE_ORDER)[number];
 
 export interface PositionMnm {
@@ -96,6 +120,72 @@ export interface ShipState {
   readonly mastBps: number;
   readonly sailsBps: number;
   readonly rudderBps: number;
+}
+
+export interface StoreBatch {
+  readonly id: string;
+  readonly store: "water" | "provisions";
+  readonly source: "lisbon" | "cape_verde";
+  readonly acquiredDate: string;
+  readonly remainingKg: number;
+}
+
+export interface DatedStoreBatches {
+  readonly water: readonly StoreBatch[];
+  readonly provisions: readonly StoreBatch[];
+}
+
+export interface SurvivalWarning {
+  readonly code: SurvivalWarningCode;
+  readonly firstCommittedDay: number;
+  readonly message: string;
+}
+
+export type SurvivalStatus =
+  | { readonly kind: "active"; readonly message: "Expedition remains active." }
+  | {
+      readonly kind: "stranded";
+      readonly reason:
+        | "hull_danger"
+        | "mast_disabled"
+        | "sails_disabled"
+        | "rudder_disabled"
+        | "insufficient_able_crew";
+      readonly message: string;
+    }
+  | {
+      readonly kind: "terminal";
+      readonly reason: "ship_lost" | "crew_unable_to_continue";
+      readonly message: string;
+    };
+
+export type SurvivalInterrupt =
+  | { readonly kind: "none" }
+  | { readonly kind: "warning"; readonly warnings: readonly SurvivalWarningCode[] }
+  | {
+      readonly kind: "stranded";
+      readonly reason: Extract<SurvivalStatus, { readonly kind: "stranded" }>["reason"];
+      readonly availableResponses: readonly ("repair" | "distress" | "abandon_objective")[];
+    }
+  | {
+      readonly kind: "terminal";
+      readonly reason: Extract<SurvivalStatus, { readonly kind: "terminal" }>["reason"];
+    };
+
+export interface SurvivalState {
+  readonly lifecycle: "outfitting" | "underway";
+  readonly location: SurvivalLocation;
+  readonly batches: DatedStoreBatches;
+  readonly nextBatchSequence: number;
+  readonly capeVerdeStock: StoresState;
+  readonly foulingSpeedLossBps: number;
+  readonly careeningDaysCompleted: number;
+  readonly warnings: readonly SurvivalWarning[];
+  readonly zeroWaterPressureDays: number;
+  readonly zeroProvisionPressureDays: number;
+  readonly status: SurvivalStatus;
+  readonly interruption: SurvivalInterrupt;
+  readonly expeditionIntent: ExpeditionIntent;
 }
 
 export interface PrngState {
@@ -189,11 +279,65 @@ export interface AdvanceDayCommand {
   readonly type: "advance_day";
 }
 
+export interface SetLisbonOutfittingCommand {
+  readonly type: "set_lisbon_outfitting";
+  readonly allocation: StoresState;
+}
+
+export interface DepartLisbonCommand {
+  readonly type: "depart_lisbon";
+}
+
+export interface EnterCapeVerdePortCommand {
+  readonly type: "enter_cape_verde_port";
+}
+
+export interface LeaveCapeVerdePortCommand {
+  readonly type: "leave_cape_verde_port";
+}
+
+export interface PurchaseAtCapeVerdeCommand {
+  readonly type: "purchase_at_cape_verde";
+  readonly store: StoreKind;
+  readonly quantityKg: number;
+}
+
+export interface RestAtCapeVerdeCommand {
+  readonly type: "rest_at_cape_verde";
+}
+
+export interface RepairDayCommand {
+  readonly type: "repair_day";
+  readonly component: ShipComponent;
+  readonly location: "at_sea" | "cape_verde";
+}
+
+export interface CareenDayAtCapeVerdeCommand {
+  readonly type: "careen_day_at_cape_verde";
+}
+
+export interface SetExpeditionIntentCommand {
+  readonly type: "set_expedition_intent";
+  readonly intent: ExpeditionIntent;
+}
+
+export type SurvivalOnlyCommand =
+  | SetLisbonOutfittingCommand
+  | DepartLisbonCommand
+  | EnterCapeVerdePortCommand
+  | LeaveCapeVerdePortCommand
+  | PurchaseAtCapeVerdeCommand
+  | RestAtCapeVerdeCommand
+  | RepairDayCommand
+  | CareenDayAtCapeVerdeCommand
+  | SetExpeditionIntentCommand;
+
 export type SimulationCommand =
   | SetHeadingCommand
   | SetSailingPolicyCommand
   | SetRationPolicyCommand
-  | AdvanceDayCommand;
+  | AdvanceDayCommand
+  | SurvivalOnlyCommand;
 
 export interface CommandLogEntry {
   readonly index: number;
@@ -237,7 +381,106 @@ export interface NavigationDayLogEntry extends DayLogEntryBase {
   readonly interruption: NavigationInterrupt;
 }
 
-export type CanonicalLogEntry = CommandLogEntry | DayLogEntry | NavigationDayLogEntry;
+export type SurvivalActionResult =
+  | {
+      readonly kind: "lisbon_outfitting_set";
+      readonly allocation: StoresState;
+      readonly costDucats: number;
+      readonly moneyRemainingDucats: number;
+      readonly allocatableHoldUsedKg: number;
+    }
+  | {
+      readonly kind: "departed_lisbon";
+      readonly moneyCarriedDucats: number;
+      readonly allocatableHoldUsedKg: number;
+    }
+  | { readonly kind: "entered_cape_verde_port" }
+  | { readonly kind: "left_cape_verde_port" }
+  | {
+      readonly kind: "cape_verde_purchase";
+      readonly store: StoreKind;
+      readonly quantityKg: number;
+      readonly costDucats: number;
+      readonly moneyRemainingDucats: number;
+      readonly stockRemainingKg: number;
+      readonly allocatableHoldUsedKg: number;
+    }
+  | {
+      readonly kind: "expedition_intent_set";
+      readonly intent: ExpeditionIntent;
+    };
+
+export interface SurvivalActionLogEntry {
+  readonly index: number;
+  readonly type: "survival_action";
+  readonly committedDay: number;
+  readonly result: SurvivalActionResult;
+  readonly warnings: readonly SurvivalWarning[];
+  readonly status: SurvivalStatus;
+  readonly interruption: SurvivalInterrupt;
+}
+
+export type SurvivalDayActivityResult =
+  | { readonly kind: "sailing" }
+  | {
+      readonly kind: "stranded_wait";
+      readonly reason: Extract<SurvivalStatus, { readonly kind: "stranded" }>["reason"];
+    }
+  | {
+      readonly kind: "repair";
+      readonly location: "at_sea" | "cape_verde";
+      readonly component: ShipComponent;
+      readonly repairStoresSpentKg: number;
+      readonly conditionRestoredBps: number;
+    }
+  | {
+      readonly kind: "port_rest";
+      readonly moneySpentDucats: number;
+      readonly healthRestoredBps: number;
+      readonly moraleRestoredBps: number;
+    }
+  | {
+      readonly kind: "careening";
+      readonly completedDays: number;
+      readonly completed: boolean;
+      readonly foulingReset: boolean;
+    };
+
+export interface SurvivalDayLogEntry {
+  readonly index: number;
+  readonly type: "survival_day";
+  readonly committedDay: number;
+  readonly date: string;
+  readonly phaseOrder: readonly DayPhase[];
+  readonly heading: Heading;
+  readonly sailingPolicy: SailingPolicy;
+  readonly rationPolicy: RationPolicy;
+  readonly environmentId: string;
+  readonly estimatedPosition: PositionMnm;
+  readonly uncertainty: UncertaintyRadiiMnm;
+  readonly waterConsumedKg: number;
+  readonly provisionsConsumedKg: number;
+  readonly provisionsSpoiledKg: number;
+  readonly observedWeather: WeatherKind;
+  readonly observedWind: ObservedWind;
+  readonly observation: ObservationResult;
+  readonly landfall: LandfallResult;
+  readonly event: "none";
+  readonly activity: SurvivalDayActivityResult;
+  readonly foulingSpeedLossBps: number;
+  readonly warnings: readonly SurvivalWarning[];
+  readonly status: SurvivalStatus;
+  readonly interruption: SurvivalInterrupt;
+}
+
+export type SurvivalCommandResult = SurvivalActionLogEntry | SurvivalDayLogEntry | CommandLogEntry;
+
+export type CanonicalLogEntry =
+  | CommandLogEntry
+  | DayLogEntry
+  | NavigationDayLogEntry
+  | SurvivalActionLogEntry
+  | SurvivalDayLogEntry;
 
 interface SimulationStateBase {
   readonly contentVersion: string;
@@ -268,7 +511,16 @@ export interface NavigationSimulationState extends SimulationStateBase {
   readonly navigation: NavigationState;
 }
 
-export type SimulationState = LegacySimulationState | NavigationSimulationState;
+export interface SurvivalSimulationState extends SimulationStateBase {
+  readonly format: typeof SURVIVAL_STATE_FORMAT;
+  readonly navigation: NavigationState;
+  readonly survival: SurvivalState;
+}
+
+export type SimulationState =
+  | LegacySimulationState
+  | NavigationSimulationState
+  | SurvivalSimulationState;
 
 export interface InitialStateConfig {
   readonly contentVersion: string;
@@ -294,6 +546,35 @@ export interface NavigationInitialStateConfig extends InitialStateConfig {
   readonly uncertainty?: UncertaintyRadiiMnm;
   readonly initialWeather?: WeatherKind;
   readonly knowledge?: readonly NavigationFact[];
+}
+
+export interface SurvivalInitialStateConfig {
+  readonly contentVersion: string;
+  readonly runSeed: string;
+  readonly date?: string;
+  readonly heading?: Heading;
+  readonly sailingPolicy?: SailingPolicy;
+  readonly rationPolicy?: RationPolicy;
+  readonly initialWeather?: WeatherKind;
+  readonly knowledge?: readonly NavigationFact[];
+}
+
+export interface CapeVerdePortFixtureConfig extends SurvivalInitialStateConfig {
+  readonly waterKg?: number;
+  readonly provisionsKg?: number;
+  readonly repairStoresKg?: number;
+  readonly medicineKg?: number;
+  readonly moneyDucats?: number;
+  readonly acquiredDate?: string;
+  readonly crewCount?: number;
+  readonly ableCrew?: number;
+  readonly healthBps?: number;
+  readonly moraleBps?: number;
+  readonly hullBps?: number;
+  readonly mastBps?: number;
+  readonly sailsBps?: number;
+  readonly rudderBps?: number;
+  readonly foulingSpeedLossBps?: number;
 }
 
 export interface NavigationEnvironmentContext {
@@ -379,7 +660,27 @@ export interface NavigationPlayerView extends PlayerViewBase {
   };
 }
 
-export type PlayerView = LegacyPlayerView | NavigationPlayerView;
+export interface SurvivalPlayerView extends PlayerViewBase {
+  readonly navigation: NavigationPlayerView["navigation"];
+  readonly survival: {
+    readonly lifecycle: SurvivalState["lifecycle"];
+    readonly location: SurvivalLocation;
+    readonly allocatableHoldUsedKg: number;
+    readonly allocatableHoldRemainingKg: number;
+    readonly fixedMissionAllocationKg: number;
+    readonly totalHoldKg: number;
+    readonly batches: DatedStoreBatches;
+    readonly capeVerdeStock: StoresState | null;
+    readonly foulingSpeedLossBps: number;
+    readonly careeningDaysCompleted: number;
+    readonly warnings: readonly SurvivalWarning[];
+    readonly status: SurvivalStatus;
+    readonly interruption: SurvivalInterrupt;
+    readonly expeditionIntent: ExpeditionIntent;
+  };
+}
+
+export type PlayerView = LegacyPlayerView | NavigationPlayerView | SurvivalPlayerView;
 
 export interface LegacySaveEnvelope {
   readonly format: typeof SAVE_FORMAT;
@@ -391,10 +692,18 @@ export interface NavigationSaveEnvelope {
   readonly state: NavigationSimulationState;
 }
 
-export type SaveEnvelope = LegacySaveEnvelope | NavigationSaveEnvelope;
+export interface SurvivalSaveEnvelope {
+  readonly format: typeof SURVIVAL_SAVE_FORMAT;
+  readonly state: SurvivalSimulationState;
+}
+
+export type SaveEnvelope = LegacySaveEnvelope | NavigationSaveEnvelope | SurvivalSaveEnvelope;
 
 export interface ReplayRecord {
-  readonly format: typeof REPLAY_FORMAT | typeof NAVIGATION_REPLAY_FORMAT;
+  readonly format:
+    | typeof REPLAY_FORMAT
+    | typeof NAVIGATION_REPLAY_FORMAT
+    | typeof SURVIVAL_REPLAY_FORMAT;
   readonly contentVersion: string;
   readonly runSeed: string;
   readonly startingStateHash: string;

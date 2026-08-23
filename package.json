@@ -23,7 +23,7 @@
     "chart:wp1": "pnpm build && node scripts/generate-wp1-chart.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:determinism": "vitest run test/determinism.test.ts test/navigation-determinism.test.ts --reporter=verbose"
+    "test:determinism": "vitest run test/determinism.test.ts test/navigation-determinism.test.ts test/survival-determinism.test.ts --reporter=verbose"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

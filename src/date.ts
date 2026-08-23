@@ -48,3 +48,32 @@ export function addOneDay(value: string): string {
   }
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
+
+function isoDateOrdinal(value: string): number {
+  assertIsoDate(value);
+  const match = ISO_DATE.exec(value);
+  if (match === null) {
+    throw new SimulationValidationError("date could not be parsed");
+  }
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const adjustedYear = Number(match[1]) - (month <= 2 ? 1 : 0);
+  const era = Math.floor(adjustedYear / 400);
+  const yearOfEra = adjustedYear - era * 400;
+  const shiftedMonth = month + (month > 2 ? -3 : 9);
+  const dayOfYear = Math.floor((153 * shiftedMonth + 2) / 5) + day - 1;
+  return era * 146_097
+    + yearOfEra * 365
+    + Math.floor(yearOfEra / 4)
+    - Math.floor(yearOfEra / 100)
+    + dayOfYear;
+}
+
+/** Whole Gregorian day boundaries from earlier (inclusive) to later (exclusive). */
+export function daysBetweenIsoDates(earlier: string, later: string): number {
+  const difference = isoDateOrdinal(later) - isoDateOrdinal(earlier);
+  if (difference < 0) {
+    throw new SimulationValidationError("later date must not precede earlier date");
+  }
+  return difference;
+}
