@@ -5,6 +5,8 @@ import { deepFreeze } from "./immutable.js";
 import {
   NAVIGATION_REPLAY_FORMAT,
   NAVIGATION_STATE_FORMAT,
+  JOURNEY_REPLAY_FORMAT,
+  JOURNEY_STATE_FORMAT,
   REPLAY_FORMAT,
   SURVIVAL_REPLAY_FORMAT,
   SURVIVAL_STATE_FORMAT,
@@ -35,9 +37,10 @@ function assertReplayRecord(value: unknown): asserts value is ReplayRecord {
     record["format"] !== REPLAY_FORMAT
     && record["format"] !== NAVIGATION_REPLAY_FORMAT
     && record["format"] !== SURVIVAL_REPLAY_FORMAT
+    && record["format"] !== JOURNEY_REPLAY_FORMAT
   ) {
     throw new ReplayError(
-      `replay format must be ${REPLAY_FORMAT}, ${NAVIGATION_REPLAY_FORMAT}, or ${SURVIVAL_REPLAY_FORMAT}`,
+      `replay format must be ${REPLAY_FORMAT}, ${NAVIGATION_REPLAY_FORMAT}, ${SURVIVAL_REPLAY_FORMAT}, or ${JOURNEY_REPLAY_FORMAT}`,
     );
   }
   if (typeof record["contentVersion"] !== "string" || record["contentVersion"].length === 0) {
@@ -77,13 +80,26 @@ export function createReplay(
     const survivalOnly = ![
       "set_heading", "set_sailing_policy", "set_ration_policy", "advance_day",
     ].includes(command.type);
-    if (startingState.format !== SURVIVAL_STATE_FORMAT && survivalOnly) {
+    const journeyOnly = [
+      "purchase_cape_verde_rumour", "recognise_cape_landfall", "survey_cape_day",
+      "collect_cape_water", "leave_cape", "choose_event",
+    ].includes(command.type);
+    if (
+      startingState.format !== SURVIVAL_STATE_FORMAT
+      && startingState.format !== JOURNEY_STATE_FORMAT
+      && survivalOnly
+    ) {
       throw new ReplayError("WP2 survival commands require replay/state format v3");
+    }
+    if (startingState.format !== JOURNEY_STATE_FORMAT && journeyOnly) {
+      throw new ReplayError("WP3 journey commands require replay/state format v4");
     }
     commandCopies.push(copyCommand(command));
   }
   return deepFreeze({
-    format: startingState.format === SURVIVAL_STATE_FORMAT
+    format: startingState.format === JOURNEY_STATE_FORMAT
+      ? JOURNEY_REPLAY_FORMAT
+      : startingState.format === SURVIVAL_STATE_FORMAT
       ? SURVIVAL_REPLAY_FORMAT
       : startingState.format === NAVIGATION_STATE_FORMAT
         ? NAVIGATION_REPLAY_FORMAT
@@ -113,9 +129,11 @@ export function replay(
   }
   const formatMatches = (record.format === REPLAY_FORMAT
       && startingState.format !== NAVIGATION_STATE_FORMAT
-      && startingState.format !== SURVIVAL_STATE_FORMAT)
+      && startingState.format !== SURVIVAL_STATE_FORMAT
+      && startingState.format !== JOURNEY_STATE_FORMAT)
     || (record.format === NAVIGATION_REPLAY_FORMAT && startingState.format === NAVIGATION_STATE_FORMAT)
-    || (record.format === SURVIVAL_REPLAY_FORMAT && startingState.format === SURVIVAL_STATE_FORMAT);
+    || (record.format === SURVIVAL_REPLAY_FORMAT && startingState.format === SURVIVAL_STATE_FORMAT)
+    || (record.format === JOURNEY_REPLAY_FORMAT && startingState.format === JOURNEY_STATE_FORMAT);
   if (!formatMatches) {
     throw new ReplayError("replay format version does not match the starting state version");
   }

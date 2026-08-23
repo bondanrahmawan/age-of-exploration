@@ -10,10 +10,14 @@ import {
   DAY_PHASE_ORDER,
   EXPEDITION_INTENTS,
   HEADINGS,
+  JOURNEY_FACT_TYPES,
+  JOURNEY_LOCATIONS,
+  JOURNEY_STATE_FORMAT,
   NAVIGATION_FACT_STATUSES,
   NAVIGATION_STATE_FORMAT,
   PRNG_ALGORITHM,
   RATION_POLICIES,
+  RUN_OUTCOME_IDS,
   SAILING_POLICIES,
   SHIP_COMPONENTS,
   STATE_FORMAT,
@@ -24,6 +28,7 @@ import {
   WEATHER_KINDS,
   type CanonicalLogEntry,
   type DailyEnvironment,
+  type EventEffects,
   type Heading,
   type NavigationFact,
   type PositionMnm,
@@ -33,6 +38,8 @@ import {
   type SimulationCommand,
   type SimulationState,
   type StoreBatch,
+  type JourneyFact,
+  type RunOutcome,
   type SurvivalInterrupt,
   type SurvivalStatus,
   type SurvivalWarning,
@@ -57,6 +64,11 @@ function assertExactKeys(record: UnknownRecord, expected: readonly string[], lab
   if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
     fail(`${label} must contain exactly: ${wanted.join(", ")}`);
   }
+}
+
+function assertOnlyKeys(record: UnknownRecord, allowed: readonly string[], label: string): void {
+  const unknown = Object.keys(record).filter((key) => !allowed.includes(key));
+  if (unknown.length > 0) fail(`${label} contains unknown fields: ${unknown.join(", ")}`);
 }
 
 function assertString(value: unknown, label: string, maximumLength = 256): asserts value is string {
@@ -207,6 +219,22 @@ export function assertSimulationCommand(value: unknown): asserts value is Simula
     assertEnum(value["intent"], EXPEDITION_INTENTS, "command.intent");
     return;
   }
+  if (
+    type === "purchase_cape_verde_rumour"
+    || type === "recognise_cape_landfall"
+    || type === "survey_cape_day"
+    || type === "collect_cape_water"
+    || type === "leave_cape"
+  ) {
+    assertExactKeys(value, ["type"], `${type} command`);
+    return;
+  }
+  if (type === "choose_event") {
+    assertExactKeys(value, ["type", "eventId", "choiceId"], "choose_event command");
+    assertString(value["eventId"], "command.eventId", 128);
+    assertString(value["choiceId"], "command.choiceId", 128);
+    return;
+  }
   fail("command.type is unknown");
 }
 
@@ -234,6 +262,14 @@ export function copyCommand(command: Readonly<SimulationCommand>): SimulationCom
       return { type: command.type, component: command.component, location: command.location };
     case "set_expedition_intent":
       return { type: command.type, intent: command.intent };
+    case "purchase_cape_verde_rumour":
+    case "recognise_cape_landfall":
+    case "survey_cape_day":
+    case "collect_cape_water":
+    case "leave_cape":
+      return { type: command.type };
+    case "choose_event":
+      return { type: command.type, eventId: command.eventId, choiceId: command.choiceId };
   }
 }
 
@@ -392,18 +428,32 @@ function assertSurvivalInterrupt(value: unknown, label: string): asserts value i
   fail(`${label}.kind is unknown`);
 }
 
-function assertStoreBatch(value: unknown, label: string, expectedStore: "water" | "provisions"): asserts value is StoreBatch {
+function assertStoreBatch(
+  value: unknown,
+  label: string,
+  expectedStore: "water" | "provisions",
+  allowCapeSource: boolean,
+): asserts value is StoreBatch {
   assertRecord(value, label);
   assertExactKeys(value, ["id", "store", "source", "acquiredDate", "remainingKg"], label);
   assertString(value["id"], `${label}.id`, 128);
   if (!/^batch\.\d{6}$/.test(value["id"])) fail(`${label}.id must use batch.NNNNNN`);
   if (value["store"] !== expectedStore) fail(`${label}.store must be ${expectedStore}`);
-  assertEnum(value["source"], ["lisbon", "cape_verde"] as const, `${label}.source`);
+  assertEnum(
+    value["source"],
+    allowCapeSource ? ["lisbon", "cape_verde", "cape"] as const : ["lisbon", "cape_verde"] as const,
+    `${label}.source`,
+  );
   assertIsoDate(value["acquiredDate"], `${label}.acquiredDate`);
   assertInteger(value["remainingKg"], `${label}.remainingKg`, 1, ALLOCATABLE_HOLD_KG);
 }
 
-function assertBatches(value: unknown, date: string, lifecycle: "outfitting" | "underway"): void {
+function assertBatches(
+  value: unknown,
+  date: string,
+  lifecycle: "outfitting" | "underway",
+  allowCapeSource: boolean,
+): void {
   assertRecord(value, "survival.batches");
   assertExactKeys(value, ["water", "provisions"], "survival.batches");
   const ids = new Set<string>();
@@ -413,7 +463,7 @@ function assertBatches(value: unknown, date: string, lifecycle: "outfitting" | "
     let previousDate = "0001-01-01";
     for (let index = 0; index < batches.length; index += 1) {
       const batch = batches[index];
-      assertStoreBatch(batch, `survival.batches.${store}[${index}]`, store);
+      assertStoreBatch(batch, `survival.batches.${store}[${index}]`, store, allowCapeSource);
       if (daysBetweenIsoDates(batch.acquiredDate, date) < 0) fail("batch date is in the future");
       if (batch.acquiredDate < previousDate) fail(`survival.batches.${store} must be oldest first`);
       previousDate = batch.acquiredDate;
@@ -426,7 +476,15 @@ function assertBatches(value: unknown, date: string, lifecycle: "outfitting" | "
   }
 }
 
-function assertSurvivalState(value: unknown, date: string, stores: unknown, crew: unknown, ship: unknown): void {
+function assertSurvivalState(
+  value: unknown,
+  date: string,
+  stores: unknown,
+  crew: unknown,
+  ship: unknown,
+  allowUnderwayLisbon = false,
+  allowCapeSource = false,
+): void {
   assertRecord(value, "survival");
   assertExactKeys(
     value,
@@ -443,10 +501,10 @@ function assertSurvivalState(value: unknown, date: string, stores: unknown, crew
   if (value["lifecycle"] === "outfitting" && value["location"] !== "lisbon") {
     fail("outfitting state must be at Lisbon");
   }
-  if (value["lifecycle"] === "underway" && value["location"] === "lisbon") {
+  if (value["lifecycle"] === "underway" && value["location"] === "lisbon" && !allowUnderwayLisbon) {
     fail("WP2 underway state cannot re-enter Lisbon before WP3 outcomes");
   }
-  assertBatches(value["batches"], date, value["lifecycle"]);
+  assertBatches(value["batches"], date, value["lifecycle"], allowCapeSource);
   assertInteger(value["nextBatchSequence"], "survival.nextBatchSequence", 0, 1_000_000);
   const sequencedBatches = value["batches"] as unknown as { water: StoreBatch[]; provisions: StoreBatch[] };
   const maximumSequence = [...sequencedBatches.water, ...sequencedBatches.provisions].reduce(
@@ -563,6 +621,163 @@ export function assertNavigationFact(value: unknown, label = "navigation fact"):
   fail(`${label}.type is unknown`);
 }
 
+function assertJourneyFact(value: unknown, label: string): asserts value is JourneyFact {
+  assertRecord(value, label);
+  assertExactKeys(value, ["id", "type", "status", "confidence", "source", "observedDate", "claim"], label);
+  assertString(value["id"], `${label}.id`, 128);
+  assertEnum(value["type"], JOURNEY_FACT_TYPES, `${label}.type`);
+  assertEnum(value["status"], NAVIGATION_FACT_STATUSES, `${label}.status`);
+  assertInteger(value["confidence"], `${label}.confidence`, 0, 100);
+  assertString(value["source"], `${label}.source`, 256);
+  assertIsoDate(value["observedDate"], `${label}.observedDate`);
+  assertString(value["claim"], `${label}.claim`, 1_024);
+}
+
+function assertEventEffects(value: unknown, label: string): asserts value is EventEffects {
+  assertRecord(value, label);
+  const integerKeys = [
+    "waterDeltaKg", "provisionsDeltaKg", "repairStoresDeltaKg", "medicineDeltaKg",
+    "moneyDeltaDucats", "crewHealthDeltaBps", "crewMoraleDeltaBps", "ableCrewDelta",
+    "hullDeltaBps", "mastDeltaBps", "sailsDeltaBps", "rudderDeltaBps",
+  ] as const;
+  assertOnlyKeys(
+    value,
+    [...integerKeys, "setFlags", "clearFlags", "facts", "abandonObjective", "terminalReason"],
+    label,
+  );
+  for (const key of integerKeys) {
+    if (value[key] !== undefined) assertInteger(value[key], `${label}.${key}`, -1_000_000, 1_000_000);
+  }
+  for (const key of ["setFlags", "clearFlags"] as const) {
+    if (value[key] === undefined) continue;
+    if (!Array.isArray(value[key])) fail(`${label}.${key} must be an array`);
+    for (const flag of value[key]) assertString(flag, `${label}.${key}`, 128);
+  }
+  if (value["facts"] !== undefined) {
+    if (!Array.isArray(value["facts"])) fail(`${label}.facts must be an array`);
+    for (let index = 0; index < value["facts"].length; index += 1) {
+      const fact: unknown = value["facts"][index];
+      assertRecord(fact, `${label}.facts[${index}]`);
+      assertExactKeys(fact, ["id", "type", "status", "confidence", "source", "claim"], `${label}.facts[${index}]`);
+      assertString(fact["id"], `${label}.facts[${index}].id`, 128);
+      assertEnum(fact["type"], JOURNEY_FACT_TYPES, `${label}.facts[${index}].type`);
+      assertEnum(fact["status"], NAVIGATION_FACT_STATUSES, `${label}.facts[${index}].status`);
+      assertInteger(fact["confidence"], `${label}.facts[${index}].confidence`, 0, 100);
+      assertString(fact["source"], `${label}.facts[${index}].source`, 256);
+      assertString(fact["claim"], `${label}.facts[${index}].claim`, 1_024);
+    }
+  }
+  if (value["abandonObjective"] !== undefined && typeof value["abandonObjective"] !== "boolean") {
+    fail(`${label}.abandonObjective must be boolean`);
+  }
+  if (value["terminalReason"] !== undefined) {
+    assertEnum(value["terminalReason"], ["mutiny_seizure", "authored_abandonment"] as const, `${label}.terminalReason`);
+  }
+}
+
+function assertRunOutcome(value: unknown, label: string): asserts value is RunOutcome {
+  assertRecord(value, label);
+  assertExactKeys(value, ["id", "reason", "day", "objectiveStatus", "crew", "ship", "stores", "factsCarried"], label);
+  assertEnum(value["id"], RUN_OUTCOME_IDS, `${label}.id`);
+  if (value["id"] === "report_success") fail("report_success is reserved and unreachable before WP4 report snapshots");
+  assertString(value["reason"], `${label}.reason`, 1_024);
+  assertInteger(value["day"], `${label}.day`, 0, 1_000_000);
+  assertEnum(value["objectiveStatus"], ["achieved", "not_achieved", "abandoned"] as const, `${label}.objectiveStatus`);
+  assertCrew(value["crew"]);
+  assertShip(value["ship"]);
+  assertStores(value["stores"]);
+  assertInteger(value["factsCarried"], `${label}.factsCarried`, 0, 1_000_000);
+}
+
+function assertJourneyState(value: unknown, date: string): void {
+  assertRecord(value, "journey");
+  assertExactKeys(value, [
+    "eventModel", "eventPrng", "dailyEventChancePermille", "location", "leg",
+    "objectiveAchieved", "rumourPurchased", "capeSurveyDaysCompleted",
+    "surveyedLandmarkIds", "capeWaterCollectedKg", "facts", "flags", "pendingEvent",
+    "scheduledConsequences", "eventHistory", "firedThisLeg", "outcome",
+  ], "journey");
+  if (value["eventModel"] !== "authored-journey-events-v1") {
+    fail("journey.eventModel must be authored-journey-events-v1");
+  }
+  assertPrngState(value["eventPrng"]);
+  assertInteger(value["dailyEventChancePermille"], "journey.dailyEventChancePermille", 0, 1_000);
+  assertEnum(value["location"], JOURNEY_LOCATIONS, "journey.location");
+  assertInteger(value["leg"], "journey.leg", 0, 1_000_000);
+  for (const key of ["objectiveAchieved", "rumourPurchased"] as const) {
+    if (typeof value[key] !== "boolean") fail(`journey.${key} must be boolean`);
+  }
+  assertInteger(value["capeSurveyDaysCompleted"], "journey.capeSurveyDaysCompleted", 0, 1);
+  assertInteger(value["capeWaterCollectedKg"], "journey.capeWaterCollectedKg", 0, 1_000_000_000);
+  for (const key of ["surveyedLandmarkIds", "flags", "firedThisLeg"] as const) {
+    if (!Array.isArray(value[key])) fail(`journey.${key} must be an array`);
+    const unique = new Set<string>();
+    for (const item of value[key]) {
+      assertString(item, `journey.${key}`, 128);
+      if (unique.has(item)) fail(`journey.${key} contains duplicate ${item}`);
+      unique.add(item);
+    }
+  }
+  if (!Array.isArray(value["facts"])) fail("journey.facts must be an array");
+  const factIds = new Set<string>();
+  for (let index = 0; index < value["facts"].length; index += 1) {
+    const fact = value["facts"][index];
+    assertJourneyFact(fact, `journey.facts[${index}]`);
+    if (fact.observedDate > date) fail("journey fact may not be observed in the future");
+    if (factIds.has(fact.id)) fail(`duplicate journey fact ${fact.id}`);
+    factIds.add(fact.id);
+  }
+  if (value["pendingEvent"] !== null) {
+    const pending = value["pendingEvent"];
+    assertRecord(pending, "journey.pendingEvent");
+    assertExactKeys(pending, ["eventId", "title", "text", "presentedDay", "warningStage", "choices"], "journey.pendingEvent");
+    assertString(pending["eventId"], "journey.pendingEvent.eventId", 128);
+    assertString(pending["title"], "journey.pendingEvent.title", 256);
+    assertString(pending["text"], "journey.pendingEvent.text", 2_048);
+    assertInteger(pending["presentedDay"], "journey.pendingEvent.presentedDay", 0, 1_000_000);
+    assertEnum(pending["warningStage"], ["none", "warning", "threat", "terminal"] as const, "journey.pendingEvent.warningStage");
+    if (!Array.isArray(pending["choices"]) || pending["choices"].length < 2 || pending["choices"].length > 4) {
+      fail("journey.pendingEvent.choices must contain two to four choices");
+    }
+    for (let index = 0; index < pending["choices"].length; index += 1) {
+      const item = pending["choices"][index];
+      assertRecord(item, `journey.pendingEvent.choices[${index}]`);
+      assertExactKeys(item, ["id", "label", "available", "reason"], `journey.pendingEvent.choices[${index}]`);
+      assertString(item["id"], `journey.pendingEvent.choices[${index}].id`, 128);
+      assertString(item["label"], `journey.pendingEvent.choices[${index}].label`, 256);
+      if (typeof item["available"] !== "boolean") fail("pending choice availability must be boolean");
+      if (item["reason"] !== null) assertString(item["reason"], "pending choice reason", 512);
+      if (item["available"] === (item["reason"] !== null)) fail("available choice and unavailability reason must agree");
+    }
+  }
+  if (!Array.isArray(value["scheduledConsequences"])) fail("journey.scheduledConsequences must be an array");
+  const consequenceIds = new Set<string>();
+  for (let index = 0; index < value["scheduledConsequences"].length; index += 1) {
+    const item = value["scheduledConsequences"][index];
+    assertRecord(item, `journey.scheduledConsequences[${index}]`);
+    assertExactKeys(item, ["id", "sourceEventId", "dueCommittedDay", "logText", "effects", "followUpEventId"], `journey.scheduledConsequences[${index}]`);
+    assertString(item["id"], "scheduled consequence id", 128);
+    if (consequenceIds.has(item["id"])) fail(`duplicate scheduled consequence ${item["id"] as string}`);
+    consequenceIds.add(item["id"] as string);
+    assertString(item["sourceEventId"], "scheduled consequence sourceEventId", 128);
+    assertInteger(item["dueCommittedDay"], "scheduled consequence dueCommittedDay", 0, 1_000_000);
+    assertString(item["logText"], "scheduled consequence logText", 2_048);
+    assertEventEffects(item["effects"], "scheduled consequence effects");
+    if (item["followUpEventId"] !== null) assertString(item["followUpEventId"], "scheduled consequence followUpEventId", 128);
+  }
+  if (!Array.isArray(value["eventHistory"])) fail("journey.eventHistory must be an array");
+  for (let index = 0; index < value["eventHistory"].length; index += 1) {
+    const item = value["eventHistory"][index];
+    assertRecord(item, `journey.eventHistory[${index}]`);
+    assertExactKeys(item, ["eventId", "presentedDay", "leg", "choiceId"], `journey.eventHistory[${index}]`);
+    assertString(item["eventId"], "event history id", 128);
+    assertInteger(item["presentedDay"], "event history presentedDay", 0, 1_000_000);
+    assertInteger(item["leg"], "event history leg", 0, 1_000_000);
+    if (item["choiceId"] !== null) assertString(item["choiceId"], "event history choiceId", 128);
+  }
+  if (value["outcome"] !== null) assertRunOutcome(value["outcome"], "journey.outcome");
+}
+
 function assertCommandLog(value: UnknownRecord, label: string): void {
   assertExactKeys(value, ["index", "type", "committedDay", "command", "value"], label);
   assertInteger(value["index"], `${label}.index`, 0);
@@ -579,7 +794,7 @@ function assertCommandLog(value: UnknownRecord, label: string): void {
   }
 }
 
-function assertDayLogBase(value: UnknownRecord, label: string): void {
+function assertDayLogBase(value: UnknownRecord, label: string, allowJourneyEvent = false): void {
   assertInteger(value["index"], `${label}.index`, 0);
   assertInteger(value["committedDay"], `${label}.committedDay`, 1);
   assertIsoDate(value["date"], `${label}.date`);
@@ -598,7 +813,7 @@ function assertDayLogBase(value: UnknownRecord, label: string): void {
   assertUncertainty(value["uncertainty"], `${label}.uncertainty`);
   assertInteger(value["waterConsumedKg"], `${label}.waterConsumedKg`, 0);
   assertInteger(value["provisionsConsumedKg"], `${label}.provisionsConsumedKg`, 0);
-  if (value["event"] !== "none") fail(`${label}.event must be none before WP3`);
+  if (!allowJourneyEvent && value["event"] !== "none") fail(`${label}.event must be none before WP3`);
 }
 
 function assertDayLog(value: UnknownRecord, label: string, navigation: boolean): void {
@@ -764,9 +979,96 @@ function assertSurvivalDayLog(value: UnknownRecord, label: string): void {
   assertSurvivalInterrupt(value["interruption"], `${label}.interruption`);
 }
 
+function assertJourneyDayActivity(value: unknown, label: string): void {
+  assertRecord(value, label);
+  if (value["kind"] === "cape_survey") {
+    assertExactKeys(value, ["kind", "completedDays", "completed", "factsLearned"], label);
+    assertInteger(value["completedDays"], `${label}.completedDays`, 1, 2);
+    if (typeof value["completed"] !== "boolean") fail(`${label}.completed must be boolean`);
+    if (!Array.isArray(value["factsLearned"])) fail(`${label}.factsLearned must be an array`);
+    for (const factId of value["factsLearned"]) assertString(factId, `${label}.factsLearned`, 128);
+    return;
+  }
+  if (value["kind"] === "cape_water_collection") {
+    assertExactKeys(value, ["kind", "waterCollectedKg"], label);
+    assertInteger(value["waterCollectedKg"], `${label}.waterCollectedKg`, 1, 12_000);
+    return;
+  }
+  assertSurvivalDayActivity(value, label);
+}
+
+function assertJourneyDayLog(value: UnknownRecord, label: string): void {
+  assertExactKeys(value, [
+    "index", "type", "committedDay", "date", "phaseOrder", "heading", "sailingPolicy",
+    "rationPolicy", "environmentId", "estimatedPosition", "uncertainty", "waterConsumedKg",
+    "provisionsConsumedKg", "provisionsSpoiledKg", "observedWeather", "observedWind",
+    "observation", "landfall", "event", "delayedConsequences", "activity",
+    "foulingSpeedLossBps", "warnings", "status", "interruption", "journeyLocation", "outcome",
+  ], label);
+  assertDayLogBase(value, label, true);
+  assertInteger(value["provisionsSpoiledKg"], `${label}.provisionsSpoiledKg`, 0, ALLOCATABLE_HOLD_KG);
+  assertEnum(value["observedWeather"], WEATHER_KINDS, `${label}.observedWeather`);
+  assertObservedWind(value["observedWind"], `${label}.observedWind`);
+  assertObservation(value["observation"], `${label}.observation`);
+  assertLandfall(value["landfall"], `${label}.landfall`);
+  if (value["event"] !== "none") {
+    const event = value["event"];
+    assertRecord(event, `${label}.event`);
+    assertExactKeys(event, ["eventId", "title", "text", "warningStage"], `${label}.event`);
+    assertString(event["eventId"], `${label}.event.eventId`, 128);
+    assertString(event["title"], `${label}.event.title`, 256);
+    assertString(event["text"], `${label}.event.text`, 2_048);
+    assertEnum(event["warningStage"], ["none", "warning", "threat", "terminal"] as const, `${label}.event.warningStage`);
+  }
+  if (!Array.isArray(value["delayedConsequences"])) fail(`${label}.delayedConsequences must be an array`);
+  for (let index = 0; index < value["delayedConsequences"].length; index += 1) {
+    const item = value["delayedConsequences"][index];
+    assertRecord(item, `${label}.delayedConsequences[${index}]`);
+    assertExactKeys(item, ["id", "sourceEventId", "text"], `${label}.delayedConsequences[${index}]`);
+    assertString(item["id"], "delayed consequence log id", 128);
+    assertString(item["sourceEventId"], "delayed consequence sourceEventId", 128);
+    assertString(item["text"], "delayed consequence text", 2_048);
+  }
+  assertJourneyDayActivity(value["activity"], `${label}.activity`);
+  assertInteger(value["foulingSpeedLossBps"], `${label}.foulingSpeedLossBps`, 0, SURVIVAL_TUNING.fouling.maximumSpeedLossBps);
+  assertSurvivalWarnings(value["warnings"], `${label}.warnings`);
+  assertSurvivalStatus(value["status"], `${label}.status`);
+  assertSurvivalInterrupt(value["interruption"], `${label}.interruption`);
+  assertEnum(value["journeyLocation"], JOURNEY_LOCATIONS, `${label}.journeyLocation`);
+  if (value["outcome"] !== null) assertRunOutcome(value["outcome"], `${label}.outcome`);
+}
+
+function assertJourneyActionLog(value: UnknownRecord, label: string): void {
+  assertExactKeys(value, ["index", "type", "committedDay", "result", "text", "outcome"], label);
+  assertInteger(value["index"], `${label}.index`, 0);
+  assertInteger(value["committedDay"], `${label}.committedDay`, 0);
+  assertString(value["text"], `${label}.text`, 2_048);
+  const result = value["result"];
+  assertRecord(result, `${label}.result`);
+  if (result["kind"] === "cape_verde_rumour_purchased") {
+    assertExactKeys(result, ["kind", "factId", "costDucats"], `${label}.result`);
+    assertString(result["factId"], `${label}.result.factId`, 128);
+    if (result["costDucats"] !== 10) fail("Cape Verde rumour must cost exactly 10 ducats");
+  } else if (result["kind"] === "cape_landfall_recognised") {
+    assertExactKeys(result, ["kind", "landmarkId"], `${label}.result`);
+    assertString(result["landmarkId"], `${label}.result.landmarkId`, 128);
+  } else if (result["kind"] === "left_cape") {
+    assertExactKeys(result, ["kind"], `${label}.result`);
+  } else if (result["kind"] === "event_choice_resolved") {
+    assertExactKeys(result, ["kind", "eventId", "choiceId", "scheduledConsequenceIds", "factsLearned"], `${label}.result`);
+    assertString(result["eventId"], `${label}.result.eventId`, 128);
+    assertString(result["choiceId"], `${label}.result.choiceId`, 128);
+    for (const key of ["scheduledConsequenceIds", "factsLearned"] as const) {
+      if (!Array.isArray(result[key])) fail(`${label}.result.${key} must be an array`);
+      for (const id of result[key]) assertString(id, `${label}.result.${key}`, 128);
+    }
+  } else fail(`${label}.result.kind is unknown`);
+  if (value["outcome"] !== null) assertRunOutcome(value["outcome"], `${label}.outcome`);
+}
+
 function assertCanonicalLog(
   value: unknown,
-  mode: "legacy" | "navigation" | "survival",
+  mode: "legacy" | "navigation" | "survival" | "journey",
 ): asserts value is readonly CanonicalLogEntry[] {
   if (!Array.isArray(value)) fail("canonicalLog must be an array");
   for (let index = 0; index < value.length; index += 1) {
@@ -774,12 +1076,16 @@ function assertCanonicalLog(
     const label = `canonicalLog[${index}]`;
     assertRecord(entry, label);
     if (entry["type"] === "command") assertCommandLog(entry, label);
-    else if (entry["type"] === "day" && mode !== "survival") {
+    else if (entry["type"] === "day" && mode !== "survival" && mode !== "journey") {
       assertDayLog(entry, label, mode === "navigation");
-    } else if (entry["type"] === "survival_action" && mode === "survival") {
+    } else if (entry["type"] === "survival_action" && (mode === "survival" || mode === "journey")) {
       assertSurvivalActionLog(entry, label);
     } else if (entry["type"] === "survival_day" && mode === "survival") {
       assertSurvivalDayLog(entry, label);
+    } else if (entry["type"] === "journey_day" && mode === "journey") {
+      assertJourneyDayLog(entry, label);
+    } else if (entry["type"] === "journey_action" && mode === "journey") {
+      assertJourneyActionLog(entry, label);
     }
     else fail(`${label}.type is unknown`);
     if (entry["index"] !== index) fail(`${label}.index must equal its array index`);
@@ -869,8 +1175,9 @@ export function assertDailyEnvironment(value: unknown): asserts value is DailyEn
 
 export function assertSimulationState(value: unknown): asserts value is SimulationState {
   assertRecord(value, "state");
+  const journey = value["format"] === JOURNEY_STATE_FORMAT;
   const navigation = value["format"] === NAVIGATION_STATE_FORMAT;
-  const survival = value["format"] === SURVIVAL_STATE_FORMAT;
+  const survival = value["format"] === SURVIVAL_STATE_FORMAT || journey;
   const commonKeys = [
     "format", "contentVersion", "runSeed", "committedDay", "date", "truePosition",
     "estimatedPosition", "uncertainty", "heading", "sailingPolicy", "rationPolicy",
@@ -878,11 +1185,15 @@ export function assertSimulationState(value: unknown): asserts value is Simulati
   ];
   assertExactKeys(
     value,
-    survival ? [...commonKeys, "navigation", "survival"] : navigation ? [...commonKeys, "navigation"] : commonKeys,
+    journey
+      ? [...commonKeys, "navigation", "survival", "journey"]
+      : survival
+        ? [...commonKeys, "navigation", "survival"]
+        : navigation ? [...commonKeys, "navigation"] : commonKeys,
     "state",
   );
   if (!navigation && !survival && value["format"] !== STATE_FORMAT) {
-    fail(`state.format must be ${STATE_FORMAT}, ${NAVIGATION_STATE_FORMAT}, or ${SURVIVAL_STATE_FORMAT}`);
+    fail(`state.format must be ${STATE_FORMAT}, ${NAVIGATION_STATE_FORMAT}, ${SURVIVAL_STATE_FORMAT}, or ${JOURNEY_STATE_FORMAT}`);
   }
   assertString(value["contentVersion"], "state.contentVersion", 128);
   assertString(value["runSeed"], "state.runSeed", 256);
@@ -901,9 +1212,29 @@ export function assertSimulationState(value: unknown): asserts value is Simulati
   assertPrngState(value["prng"]);
   if (navigation || survival) assertNavigationState(value["navigation"]);
   if (survival) {
-    assertSurvivalState(value["survival"], value["date"], value["stores"], value["crew"], value["ship"]);
+    assertSurvivalState(
+      value["survival"], value["date"], value["stores"], value["crew"], value["ship"], journey, journey,
+    );
   }
-  assertCanonicalLog(value["canonicalLog"], survival ? "survival" : navigation ? "navigation" : "legacy");
+  if (journey) {
+    assertJourneyState(value["journey"], value["date"]);
+    const journeyState = value["journey"];
+    const survivalState = value["survival"];
+    assertRecord(journeyState, "journey");
+    assertRecord(survivalState, "survival");
+    const expectedSurvivalLocation = journeyState["location"] === "cape_verde"
+      ? "cape_verde"
+      : journeyState["location"] === "lisbon"
+        ? "lisbon"
+        : "at_sea";
+    if (survivalState["location"] !== expectedSurvivalLocation) {
+      fail("journey and survival locations must agree");
+    }
+    if (journeyState["outcome"] !== null && journeyState["pendingEvent"] !== null) {
+      fail("a resolved journey may not retain a pending event");
+    }
+  }
+  assertCanonicalLog(value["canonicalLog"], journey ? "journey" : survival ? "survival" : navigation ? "navigation" : "legacy");
 
   const commands = value["replayCommands"];
   if (!Array.isArray(commands)) fail("state.replayCommands must be an array");
@@ -918,16 +1249,46 @@ export function assertSimulationState(value: unknown): asserts value is Simulati
     const committedDayCommand = command.type === "advance_day"
       || command.type === "rest_at_cape_verde"
       || command.type === "repair_day"
-      || command.type === "careen_day_at_cape_verde";
+      || command.type === "careen_day_at_cape_verde"
+      || command.type === "survey_cape_day"
+      || command.type === "collect_cape_water";
+    const journeyOnly = [
+      "purchase_cape_verde_rumour", "recognise_cape_landfall", "survey_cape_day",
+      "collect_cape_water", "leave_cape", "choose_event",
+    ].includes(command.type);
     const survivalOnly = ![
       "set_heading", "set_sailing_policy", "set_ration_policy", "advance_day",
     ].includes(command.type);
     if (!survival && survivalOnly) {
       fail(`state format ${value["format"] as string} may not contain WP2 command ${command.type}`);
     }
+    if (!journey && journeyOnly) {
+      fail(`state format ${value["format"] as string} may not contain WP3 command ${command.type}`);
+    }
     if (committedDayCommand) {
       advanceCount += 1;
-      if (survival) {
+      if (journey) {
+        if (log.type !== "journey_day") fail(`canonicalLog[${index}] must be a journey day entry`);
+        if (command.type === "advance_day") {
+          if (log.activity.kind !== "sailing" && log.activity.kind !== "stranded_wait") {
+            fail(`canonicalLog[${index}] activity does not match advance_day`);
+          }
+        } else if (command.type === "rest_at_cape_verde" && log.activity.kind !== "port_rest") {
+          fail(`canonicalLog[${index}] activity does not match rest_at_cape_verde`);
+        } else if (command.type === "careen_day_at_cape_verde" && log.activity.kind !== "careening") {
+          fail(`canonicalLog[${index}] activity does not match careen_day_at_cape_verde`);
+        } else if (command.type === "survey_cape_day" && log.activity.kind !== "cape_survey") {
+          fail(`canonicalLog[${index}] activity does not match survey_cape_day`);
+        } else if (command.type === "collect_cape_water" && log.activity.kind !== "cape_water_collection") {
+          fail(`canonicalLog[${index}] activity does not match collect_cape_water`);
+        } else if (command.type === "repair_day") {
+          if (
+            log.activity.kind !== "repair"
+            || log.activity.component !== command.component
+            || log.activity.location !== command.location
+          ) fail(`canonicalLog[${index}] activity does not match repair_day`);
+        }
+      } else if (survival) {
         if (log.type !== "survival_day") fail(`canonicalLog[${index}] must be a survival day entry`);
         if (command.type === "advance_day") {
           if (log.activity.kind !== "sailing" && log.activity.kind !== "stranded_wait") {
@@ -945,6 +1306,23 @@ export function assertSimulationState(value: unknown): asserts value is Simulati
           ) fail(`canonicalLog[${index}] activity does not match repair_day`);
         }
       } else if (log.type !== "day") fail(`canonicalLog[${index}] must be a day entry`);
+    } else if (journeyOnly) {
+      if (log.type !== "journey_action") fail(`canonicalLog[${index}] must be a journey action entry`);
+      const expectedResultKind = command.type === "purchase_cape_verde_rumour"
+        ? "cape_verde_rumour_purchased"
+        : command.type === "recognise_cape_landfall"
+          ? "cape_landfall_recognised"
+          : command.type === "leave_cape"
+            ? "left_cape"
+            : "event_choice_resolved";
+      if (log.result.kind !== expectedResultKind) {
+        fail(`canonicalLog[${index}] result does not match ${command.type}`);
+      }
+      if (
+        command.type === "choose_event"
+        && log.result.kind === "event_choice_resolved"
+        && (log.result.eventId !== command.eventId || log.result.choiceId !== command.choiceId)
+      ) fail(`canonicalLog[${index}] event choice result does not match its command`);
     } else if (survivalOnly) {
       if (log.type !== "survival_action") fail(`canonicalLog[${index}] must be a survival action entry`);
       const expectedResultKind = command.type === "set_lisbon_outfitting"
