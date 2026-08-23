@@ -1,0 +1,33 @@
+{
+  "name": "@age-of-exploration/simulation",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Deterministic headless simulation foundation for Age of Exploration",
+  "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "packageManager": "pnpm@11.19.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "docs/technical-plan.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "chart:wp1": "pnpm build && node scripts/generate-wp1-chart.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:determinism": "vitest run test/determinism.test.ts test/navigation-determinism.test.ts --reporter=verbose"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}
