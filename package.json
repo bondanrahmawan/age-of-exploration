@@ -21,9 +21,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "chart:wp1": "pnpm build && node scripts/generate-wp1-chart.mjs",
+    "event:validate": "pnpm build && node scripts/validate-event-catalogue.mjs",
+    "fixture:wp3": "pnpm build && node scripts/generate-wp3-fixture.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:determinism": "vitest run test/determinism.test.ts test/navigation-determinism.test.ts test/survival-determinism.test.ts --reporter=verbose"
+    "test:determinism": "vitest run test/determinism.test.ts test/navigation-determinism.test.ts test/survival-determinism.test.ts test/journey-determinism.test.ts --reporter=verbose"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

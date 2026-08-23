@@ -4,6 +4,13 @@ import {
   fairWeatherStillWaterEnvironment,
 } from "./environment.js";
 import { SimulationValidationError } from "./errors.js";
+import {
+  EVENT_TUNING,
+  authoredEventById,
+  choiceAvailability,
+  presentEvent,
+  selectDailyEvent,
+} from "./events.js";
 import { deepFreeze } from "./immutable.js";
 import { createPrngState, nextIntegerInclusive } from "./prng.js";
 import {
@@ -31,6 +38,7 @@ import {
 } from "./survival.js";
 import {
   DAY_PHASE_ORDER,
+  JOURNEY_STATE_FORMAT,
   NAVIGATION_STATE_FORMAT,
   STATE_FORMAT,
   SURVIVAL_STATE_FORMAT,
@@ -39,11 +47,23 @@ import {
   type CommandLogEntry,
   type CrewState,
   type DailyEnvironment,
+  type DelayedConsequenceLog,
   type DayLogEntry,
   type EnvironmentContext,
   type EnvironmentProvider,
+  type EventChoiceDefinition,
+  type EventEffects,
   type Heading,
   type InitialStateConfig,
+  type JourneyActionLogEntry,
+  type JourneyActionResult,
+  type JourneyDayActivityResult,
+  type JourneyDayLogEntry,
+  type JourneyFact,
+  type JourneyFixtureConfig,
+  type JourneyInitialStateConfig,
+  type JourneyPlayerView,
+  type JourneySimulationState,
   type LandfallResult,
   type LegacyDailyEnvironment,
   type LegacySimulationState,
@@ -188,7 +208,7 @@ function nominalDistanceMnm(
   sailingPolicy: SailingPolicy,
   environment: Readonly<DailyEnvironment>,
 ): number {
-  if (state.format === SURVIVAL_STATE_FORMAT) {
+  if (state.format === SURVIVAL_STATE_FORMAT || state.format === JOURNEY_STATE_FORMAT) {
     let distance = scaleByPermille(
       BASE_DAILY_RUN_MNM,
       [
@@ -315,6 +335,36 @@ function copySurvivalDayActivity(result: Readonly<SurvivalDayActivityResult>): S
   return { ...result };
 }
 
+function copyJourneyFact(fact: Readonly<JourneyFact>): JourneyFact {
+  return { ...fact };
+}
+
+function copyEventEffects(eventEffects: Readonly<EventEffects>): EventEffects {
+  return {
+    ...eventEffects,
+    ...(eventEffects.setFlags === undefined ? {} : { setFlags: [...eventEffects.setFlags] }),
+    ...(eventEffects.clearFlags === undefined ? {} : { clearFlags: [...eventEffects.clearFlags] }),
+    ...(eventEffects.facts === undefined ? {} : { facts: eventEffects.facts.map((fact) => ({ ...fact })) }),
+  };
+}
+
+function copyJourneyActivity(result: Readonly<JourneyDayActivityResult>): JourneyDayActivityResult {
+  return result.kind === "cape_survey"
+    ? { ...result, factsLearned: [...result.factsLearned] }
+    : { ...result };
+}
+
+function copyOutcome(outcome: Readonly<JourneySimulationState["journey"]["outcome"]>) {
+  return outcome === null
+    ? null
+    : {
+        ...outcome,
+        crew: { ...outcome.crew },
+        ship: { ...outcome.ship },
+        stores: { ...outcome.stores },
+      };
+}
+
 function copyLogEntry(entry: Readonly<CanonicalLogEntry>): CanonicalLogEntry {
   if (entry.type === "command") {
     return { ...entry };
@@ -341,6 +391,37 @@ function copyLogEntry(entry: Readonly<CanonicalLogEntry>): CanonicalLogEntry {
       warnings: entry.warnings.map(copySurvivalWarning),
       status: copySurvivalStatus(entry.status),
       interruption: copySurvivalInterrupt(entry.interruption),
+    };
+  }
+  if (entry.type === "journey_action") {
+    return {
+      ...entry,
+      result: entry.result.kind === "event_choice_resolved"
+        ? {
+            ...entry.result,
+            scheduledConsequenceIds: [...entry.result.scheduledConsequenceIds],
+            factsLearned: [...entry.result.factsLearned],
+          }
+        : { ...entry.result },
+      outcome: copyOutcome(entry.outcome),
+    };
+  }
+  if (entry.type === "journey_day") {
+    return {
+      ...entry,
+      phaseOrder: [...entry.phaseOrder],
+      estimatedPosition: { ...entry.estimatedPosition },
+      uncertainty: { ...entry.uncertainty },
+      observedWind: { ...entry.observedWind },
+      observation: copyObservation(entry.observation),
+      landfall: copyLandfall(entry.landfall),
+      event: entry.event === "none" ? "none" : { ...entry.event },
+      delayedConsequences: entry.delayedConsequences.map((item) => ({ ...item })),
+      activity: copyJourneyActivity(entry.activity),
+      warnings: entry.warnings.map(copySurvivalWarning),
+      status: copySurvivalStatus(entry.status),
+      interruption: copySurvivalInterrupt(entry.interruption),
+      outcome: copyOutcome(entry.outcome),
     };
   }
   if ("observedWeather" in entry) {
@@ -391,7 +472,11 @@ function detachedState(state: Readonly<SimulationState>): SimulationState {
     canonicalLog: state.canonicalLog.map(copyLogEntry),
     replayCommands: state.replayCommands.map(copyCommand),
   };
-  if (state.format === NAVIGATION_STATE_FORMAT || state.format === SURVIVAL_STATE_FORMAT) {
+  if (
+    state.format === NAVIGATION_STATE_FORMAT
+    || state.format === SURVIVAL_STATE_FORMAT
+    || state.format === JOURNEY_STATE_FORMAT
+  ) {
     const navigation = {
       environmentModel: state.navigation.environmentModel,
       environmentPrng: {
@@ -406,12 +491,8 @@ function detachedState(state: Readonly<SimulationState>): SimulationState {
       lastLandfall: copyLandfall(state.navigation.lastLandfall),
       interruption: copyInterrupt(state.navigation.interruption),
     };
-    if (state.format === SURVIVAL_STATE_FORMAT) {
-      return {
-        format: SURVIVAL_STATE_FORMAT,
-        ...common,
-        navigation,
-        survival: {
+    if (state.format === SURVIVAL_STATE_FORMAT || state.format === JOURNEY_STATE_FORMAT) {
+      const survival = {
           lifecycle: state.survival.lifecycle,
           location: state.survival.location,
           batches: copyBatches(state.survival.batches),
@@ -425,7 +506,50 @@ function detachedState(state: Readonly<SimulationState>): SimulationState {
           status: copySurvivalStatus(state.survival.status),
           interruption: copySurvivalInterrupt(state.survival.interruption),
           expeditionIntent: state.survival.expeditionIntent,
-        },
+      };
+      if (state.format === JOURNEY_STATE_FORMAT) {
+        return {
+          format: JOURNEY_STATE_FORMAT,
+          ...common,
+          navigation,
+          survival,
+          journey: {
+            eventModel: state.journey.eventModel,
+            eventPrng: {
+              algorithm: state.journey.eventPrng.algorithm,
+              words: [...state.journey.eventPrng.words] as [number, number, number, number],
+            },
+            dailyEventChancePermille: state.journey.dailyEventChancePermille,
+            location: state.journey.location,
+            leg: state.journey.leg,
+            objectiveAchieved: state.journey.objectiveAchieved,
+            rumourPurchased: state.journey.rumourPurchased,
+            capeSurveyDaysCompleted: state.journey.capeSurveyDaysCompleted,
+            surveyedLandmarkIds: [...state.journey.surveyedLandmarkIds],
+            capeWaterCollectedKg: state.journey.capeWaterCollectedKg,
+            facts: state.journey.facts.map(copyJourneyFact),
+            flags: [...state.journey.flags],
+            pendingEvent: state.journey.pendingEvent === null
+              ? null
+              : {
+                  ...state.journey.pendingEvent,
+                  choices: state.journey.pendingEvent.choices.map((item) => ({ ...item })),
+                },
+            scheduledConsequences: state.journey.scheduledConsequences.map((item) => ({
+              ...item,
+              effects: copyEventEffects(item.effects),
+            })),
+            eventHistory: state.journey.eventHistory.map((item) => ({ ...item })),
+            firedThisLeg: [...state.journey.firedThisLeg],
+            outcome: copyOutcome(state.journey.outcome),
+          },
+        };
+      }
+      return {
+        format: SURVIVAL_STATE_FORMAT,
+        ...common,
+        navigation,
+        survival,
       };
     }
     return { format: NAVIGATION_STATE_FORMAT, ...common, navigation };
@@ -550,6 +674,122 @@ export function createSurvivalState(
       status: { ...ACTIVE_SURVIVAL_STATUS },
       interruption: { kind: "none" },
       expeditionIntent: "pursue_objective",
+    },
+  });
+}
+
+export function createJourneyState(
+  config: Readonly<JourneyInitialStateConfig>,
+): JourneySimulationState {
+  const survival = createSurvivalState(config);
+  const detached = detachedState(survival) as SurvivalSimulationState;
+  return finalizeState({
+    ...detached,
+    format: JOURNEY_STATE_FORMAT,
+    journey: {
+      eventModel: "authored-journey-events-v1",
+      eventPrng: createPrngState(`${config.runSeed}${EVENT_TUNING.eventPrngDomainSeparator}`),
+      dailyEventChancePermille: config.dailyEventChancePermille
+        ?? EVENT_TUNING.baseDailyChancePermille,
+      location: "lisbon",
+      leg: 0,
+      objectiveAchieved: false,
+      rumourPurchased: false,
+      capeSurveyDaysCompleted: 0,
+      surveyedLandmarkIds: [],
+      capeWaterCollectedKg: 0,
+      facts: [],
+      flags: [],
+      pendingEvent: null,
+      scheduledConsequences: [],
+      eventHistory: [],
+      firedThisLeg: [],
+      outcome: null,
+    },
+  });
+}
+
+/** Deterministic WP3 fixture constructor for authored-location and content-contract tests. */
+export function createJourneyFixtureState(
+  config: Readonly<JourneyFixtureConfig>,
+): JourneySimulationState {
+  const base = createJourneyState(config);
+  const location = config.location ?? "at_sea";
+  const lifecycle = config.lifecycle ?? (location === "lisbon" ? "outfitting" : "underway");
+  const authoredPosition = location === "cape_verde"
+    ? LANDMARKS.find((landmark) => landmark.id === LANDMARK_IDS.capeVerde)!.centre
+    : location === "cape"
+      ? LANDMARKS.find((landmark) => landmark.id === LANDMARK_IDS.capeGoal)!.centre
+      : location === "lisbon"
+        ? LANDMARKS.find((landmark) => landmark.id === LANDMARK_IDS.lisbon)!.centre
+        : base.truePosition;
+  const truePosition = config.truePosition ?? authoredPosition;
+  const estimatedPosition = config.estimatedPosition ?? truePosition;
+  const stores: StoresState = {
+    waterKg: config.waterKg ?? (lifecycle === "outfitting" ? 0 : 10_000),
+    provisionsKg: config.provisionsKg ?? (lifecycle === "outfitting" ? 0 : 8_000),
+    repairStoresKg: config.repairStoresKg ?? (lifecycle === "outfitting" ? 0 : 2_000),
+    medicineKg: config.medicineKg ?? (lifecycle === "outfitting" ? 0 : 500),
+  };
+  assertStoreCapsAndHold(stores);
+  const dated = lifecycle === "underway"
+    ? fixtureBatches(base.date, stores.waterKg, stores.provisionsKg)
+    : { batches: emptyBatches(), nextSequence: 0 };
+  const crew: CrewState = {
+    count: config.crewCount ?? SURVIVAL_TUNING.crew.departureCount,
+    able: config.ableCrew ?? config.crewCount ?? SURVIVAL_TUNING.crew.departureAble,
+    healthBps: config.healthBps ?? SURVIVAL_TUNING.crew.departureHealthBps,
+    moraleBps: config.moraleBps ?? SURVIVAL_TUNING.crew.departureMoraleBps,
+  };
+  const ship: ShipState = {
+    hullBps: config.hullBps ?? 10_000,
+    mastBps: config.mastBps ?? 10_000,
+    sailsBps: config.sailsBps ?? 10_000,
+    rudderBps: config.rudderBps ?? 10_000,
+  };
+  const status = sailingCapabilityStatus(crew, ship);
+  const navigationLandfall: LandfallResult = location === "cape_verde"
+    ? { kind: "recognised", landmarkId: LANDMARK_IDS.capeVerde }
+    : location === "cape"
+      ? config.objectiveAchieved === true
+        ? { kind: "recognised", landmarkId: LANDMARK_IDS.capeGoal }
+        : { kind: "visible_unrecognised", knownFactId: LANDMARK_IDS.capeGoal }
+      : { kind: "none" };
+  const navigationInterrupt: NavigationInterrupt = navigationLandfall.kind === "none"
+    ? { kind: "none" }
+    : { kind: "landfall", result: navigationLandfall.kind };
+  return finalizeState({
+    ...detachedState(base) as JourneySimulationState,
+    truePosition: { ...truePosition },
+    estimatedPosition: { ...estimatedPosition },
+    uncertainty: location === "at_sea"
+      ? { ...base.uncertainty }
+      : { eastWestMnm: 5_000, northSouthMnm: 5_000 },
+    crew,
+    stores,
+    moneyDucats: config.moneyDucats ?? (lifecycle === "outfitting" ? 300 : 100),
+    ship,
+    navigation: {
+      ...base.navigation,
+      lastLandfall: navigationLandfall,
+      interruption: navigationInterrupt,
+    },
+    survival: {
+      ...base.survival,
+      lifecycle,
+      location: location === "lisbon" ? "lisbon" : location === "cape_verde" ? "cape_verde" : "at_sea",
+      batches: dated.batches,
+      nextBatchSequence: dated.nextSequence,
+      status,
+      interruption: interruptForStatus(status),
+    },
+    journey: {
+      ...base.journey,
+      location: location === "cape" && config.objectiveAchieved !== true ? "at_sea" : location,
+      objectiveAchieved: config.objectiveAchieved ?? false,
+      rumourPurchased: config.rumourPurchased ?? false,
+      flags: [...(config.flags ?? [])],
+      facts: (config.facts ?? []).map(copyJourneyFact),
     },
   });
 }
@@ -685,7 +925,9 @@ function resolveEnvironment(
     heading,
     sailingPolicy,
     truePosition: { ...state.truePosition },
-    navigation: state.format === NAVIGATION_STATE_FORMAT || state.format === SURVIVAL_STATE_FORMAT
+    navigation: state.format === NAVIGATION_STATE_FORMAT
+      || state.format === SURVIVAL_STATE_FORMAT
+      || state.format === JOURNEY_STATE_FORMAT
       ? {
           environmentPrng: {
             algorithm: state.navigation.environmentPrng.algorithm,
@@ -844,7 +1086,7 @@ function resolveNavigationObservation(
 }
 
 function resolveLandfall(
-  state: Readonly<NavigationSimulationState | SurvivalSimulationState>,
+  state: Readonly<NavigationSimulationState | SurvivalSimulationState | JourneySimulationState>,
   environment: Readonly<NavigationDailyEnvironment>,
   truePosition: Readonly<PositionMnm>,
   estimatedPosition: Readonly<PositionMnm>,
@@ -1180,6 +1422,135 @@ function requestedSurvivalConsumption(
   };
 }
 
+interface JourneyEffectState {
+  readonly stores: StoresState;
+  readonly batches: { readonly water: readonly StoreBatch[]; readonly provisions: readonly StoreBatch[] };
+  readonly crew: CrewState;
+  readonly ship: ShipState;
+  readonly moneyDucats: number;
+  readonly flags: readonly string[];
+  readonly facts: readonly JourneyFact[];
+  readonly expeditionIntent: SurvivalSimulationState["survival"]["expeditionIntent"];
+  readonly terminalReason: "mutiny_seizure" | "authored_abandonment" | null;
+}
+
+function applyJourneyEffects(
+  prior: Readonly<JourneyEffectState>,
+  eventEffects: Readonly<EventEffects>,
+  date: string,
+): JourneyEffectState {
+  let batches = copyBatches(prior.batches);
+  let stores = { ...prior.stores };
+  if ((eventEffects.waterDeltaKg ?? 0) > 0 || (eventEffects.provisionsDeltaKg ?? 0) > 0) {
+    throw new SimulationValidationError("authored event effects may not create dated store mass");
+  }
+  if ((eventEffects.waterDeltaKg ?? 0) < 0) {
+    const consumed = consumeOldestFirst(batches.water, -(eventEffects.waterDeltaKg ?? 0));
+    batches = { ...batches, water: consumed.batches };
+    stores = { ...stores, waterKg: batchTotalKg(batches.water) };
+  }
+  if ((eventEffects.provisionsDeltaKg ?? 0) < 0) {
+    const consumed = consumeOldestFirst(
+      batches.provisions,
+      -(eventEffects.provisionsDeltaKg ?? 0),
+    );
+    batches = { ...batches, provisions: consumed.batches };
+    stores = { ...stores, provisionsKg: batchTotalKg(batches.provisions) };
+  }
+  stores = {
+    ...stores,
+    repairStoresKg: clampInteger(
+      stores.repairStoresKg + (eventEffects.repairStoresDeltaKg ?? 0),
+      0,
+      SURVIVAL_TUNING.stores.repair_stores.capKg,
+    ),
+    medicineKg: clampInteger(
+      stores.medicineKg + (eventEffects.medicineDeltaKg ?? 0),
+      0,
+      SURVIVAL_TUNING.stores.medicine.capKg,
+    ),
+  };
+  const crew = {
+    ...prior.crew,
+    able: clampInteger(
+      prior.crew.able + (eventEffects.ableCrewDelta ?? 0),
+      0,
+      prior.crew.count,
+    ),
+    healthBps: clampInteger(
+      prior.crew.healthBps + (eventEffects.crewHealthDeltaBps ?? 0),
+      0,
+      CONDITION_MAX_BPS,
+    ),
+    moraleBps: clampInteger(
+      prior.crew.moraleBps + (eventEffects.crewMoraleDeltaBps ?? 0),
+      0,
+      CONDITION_MAX_BPS,
+    ),
+  };
+  const ship = {
+    hullBps: clampInteger(prior.ship.hullBps + (eventEffects.hullDeltaBps ?? 0), 0, CONDITION_MAX_BPS),
+    mastBps: clampInteger(prior.ship.mastBps + (eventEffects.mastDeltaBps ?? 0), 0, CONDITION_MAX_BPS),
+    sailsBps: clampInteger(prior.ship.sailsBps + (eventEffects.sailsDeltaBps ?? 0), 0, CONDITION_MAX_BPS),
+    rudderBps: clampInteger(prior.ship.rudderBps + (eventEffects.rudderDeltaBps ?? 0), 0, CONDITION_MAX_BPS),
+  };
+  let flags = prior.flags.filter((flag) => !(eventEffects.clearFlags ?? []).includes(flag));
+  for (const flag of eventEffects.setFlags ?? []) {
+    if (!flags.includes(flag)) flags = [...flags, flag];
+  }
+  let facts = prior.facts.map(copyJourneyFact);
+  for (const factEffect of eventEffects.facts ?? []) {
+    const fact: JourneyFact = { ...factEffect, observedDate: date };
+    const existing = facts.findIndex((candidate) => candidate.id === fact.id);
+    if (existing === -1) facts = [...facts, fact];
+    else facts = facts.map((candidate, index) => index === existing ? fact : candidate);
+  }
+  return {
+    stores,
+    batches,
+    crew,
+    ship,
+    moneyDucats: clampInteger(
+      prior.moneyDucats + (eventEffects.moneyDeltaDucats ?? 0),
+      0,
+      1_000_000_000,
+    ),
+    flags,
+    facts,
+    expeditionIntent: eventEffects.abandonObjective === true
+      ? "objective_abandoned"
+      : prior.expeditionIntent,
+    terminalReason: eventEffects.terminalReason ?? prior.terminalReason,
+  };
+}
+
+function currentRunOutcome(
+  id: "full_success" | "partial_return" | "objective_failure",
+  reason: string,
+  day: number,
+  objectiveAchieved: boolean,
+  expeditionIntent: SurvivalSimulationState["survival"]["expeditionIntent"],
+  crew: Readonly<CrewState>,
+  ship: Readonly<ShipState>,
+  stores: Readonly<StoresState>,
+  factsCarried: number,
+) {
+  return {
+    id,
+    reason,
+    day,
+    objectiveStatus: objectiveAchieved
+      ? "achieved" as const
+      : expeditionIntent === "objective_abandoned"
+        ? "abandoned" as const
+        : "not_achieved" as const,
+    crew: { ...crew },
+    ship: { ...ship },
+    stores: { ...stores },
+    factsCarried,
+  };
+}
+
 type SurvivalDayCommand = Extract<
   SimulationCommand,
   {
@@ -1191,15 +1562,51 @@ type SurvivalDayCommand = Extract<
   }
 >;
 
+type JourneyDayCommand = Extract<
+  SimulationCommand,
+  { readonly type: "survey_cape_day" | "collect_cape_water" }
+>;
+
 function validateSurvivalDayCommand(
-  state: Readonly<SurvivalSimulationState>,
-  command: Readonly<SurvivalDayCommand>,
+  state: Readonly<SurvivalSimulationState | JourneySimulationState>,
+  command: Readonly<SurvivalDayCommand | JourneyDayCommand>,
 ): void {
   if (state.survival.lifecycle !== "underway") {
     throw new SimulationValidationError("a survival day cannot begin before Lisbon departure");
   }
   if (state.survival.status.kind === "terminal") {
     throw new SimulationValidationError("a terminal expedition cannot commit another day");
+  }
+  if (command.type === "survey_cape_day") {
+    if (state.format !== JOURNEY_STATE_FORMAT || state.journey.location !== "cape") {
+      throw new SimulationValidationError("Cape surveying requires a recognised Cape landfall");
+    }
+    if (!state.journey.objectiveAchieved) {
+      throw new SimulationValidationError("Cape surveying requires the authored Cape objective to be recognised");
+    }
+    if (state.journey.surveyedLandmarkIds.includes(LANDMARK_IDS.capeGoal)) {
+      throw new SimulationValidationError("the Cape landmark may be surveyed only once per expedition");
+    }
+    return;
+  }
+  if (command.type === "collect_cape_water") {
+    if (state.format !== JOURNEY_STATE_FORMAT || state.journey.location !== "cape") {
+      throw new SimulationValidationError("Cape water collection requires the expedition to be at the Cape");
+    }
+    const source = state.journey.facts.find((fact) => fact.id === "fact.cape-water-source");
+    if (source === undefined || source.status === "disproved" || source.confidence < 40) {
+      throw new SimulationValidationError("Cape water collection requires the authored water-source fact");
+    }
+    const requested = requestedSurvivalConsumption(state.crew.count, state.rationPolicy);
+    const capacityAfterConsumption = Math.min(
+      SURVIVAL_TUNING.stores.water.capKg - state.stores.waterKg + requested.waterKg,
+      SURVIVAL_TUNING.hold.allocatableKg - holdUsedKg(state.stores)
+        + requested.waterKg + requested.provisionsKg,
+    );
+    if (capacityAfterConsumption <= 0) {
+      throw new SimulationValidationError("the hold has no capacity for collected Cape water");
+    }
+    return;
   }
   if (command.type === "advance_day") {
     if (state.survival.location !== "at_sea") {
@@ -1235,10 +1642,10 @@ function validateSurvivalDayCommand(
 }
 
 function advanceSurvivalDay(
-  state: Readonly<SurvivalSimulationState>,
-  command: Readonly<SurvivalDayCommand>,
+  state: Readonly<SurvivalSimulationState | JourneySimulationState>,
+  command: Readonly<SurvivalDayCommand | JourneyDayCommand>,
   provider: EnvironmentProvider,
-): SurvivalSimulationState {
+): SurvivalSimulationState | JourneySimulationState {
   validateSurvivalDayCommand(state, command);
 
   let truePosition = { ...state.truePosition };
@@ -1260,7 +1667,7 @@ function advanceSurvivalDay(
   let navigationInterrupt: NavigationInterrupt = { kind: "none" };
   let knowledge = state.navigation.knowledge.map(copyFact);
   let environmentId = "wp2-no-randomness-v1";
-  let activity: SurvivalDayActivityResult;
+  let activity: JourneyDayActivityResult;
 
   if (command.type === "advance_day") {
     const capability = sailingCapabilityStatus(state.crew, state.ship);
@@ -1322,11 +1729,25 @@ function advanceSurvivalDay(
       moraleRestoredBps: 0,
     };
     environmentId = "wp2-no-randomness-v1:cape-verde-rest";
-  } else {
+  } else if (command.type === "careen_day_at_cape_verde") {
     const completedDays = state.survival.careeningDaysCompleted + 1;
     const completed = completedDays === SURVIVAL_TUNING.fouling.careeningDays;
     activity = { kind: "careening", completedDays, completed, foulingReset: completed };
     environmentId = "wp2-no-randomness-v1:cape-verde-careening";
+  } else if (command.type === "survey_cape_day") {
+    const completedDays = state.format === JOURNEY_STATE_FORMAT
+      ? state.journey.capeSurveyDaysCompleted + 1
+      : 1;
+    activity = {
+      kind: "cape_survey",
+      completedDays,
+      completed: completedDays === 2,
+      factsLearned: [],
+    };
+    environmentId = "wp3-no-movement-v1:cape-survey";
+  } else {
+    activity = { kind: "cape_water_collection", waterCollectedKg: 0 };
+    environmentId = "wp3-no-movement-v1:cape-water-collection";
   }
 
   const committedDay = state.committedDay + 1;
@@ -1338,7 +1759,7 @@ function advanceSurvivalDay(
     requested.provisionsKg,
   );
   const spoiled = spoilProvisionBatches(provisions.batches, date);
-  const batches = {
+  let batches = {
     water: water.batches,
     provisions: spoiled.batches,
   };
@@ -1351,6 +1772,19 @@ function advanceSurvivalDay(
   let moneyDucats = state.moneyDucats;
   let careeningDaysCompleted = state.survival.careeningDaysCompleted;
   let foulingSpeedLossBps = state.survival.foulingSpeedLossBps;
+  let nextBatchSequence = state.survival.nextBatchSequence;
+  let capeSurveyDaysCompleted = state.format === JOURNEY_STATE_FORMAT
+    ? state.journey.capeSurveyDaysCompleted
+    : 0;
+  let surveyedLandmarkIds = state.format === JOURNEY_STATE_FORMAT
+    ? [...state.journey.surveyedLandmarkIds]
+    : [];
+  let capeWaterCollectedKg = state.format === JOURNEY_STATE_FORMAT
+    ? state.journey.capeWaterCollectedKg
+    : 0;
+  let journeyFacts = state.format === JOURNEY_STATE_FORMAT
+    ? state.journey.facts.map(copyJourneyFact)
+    : [];
 
   if (isTropicalDay(state.truePosition)) {
     foulingSpeedLossBps = Math.min(
@@ -1373,6 +1807,63 @@ function advanceSurvivalDay(
   } else if (activity.kind === "careening") {
     careeningDaysCompleted = activity.completed ? 0 : activity.completedDays;
     if (activity.completed) foulingSpeedLossBps = 0;
+  } else if (activity.kind === "cape_survey") {
+    capeSurveyDaysCompleted = activity.completed ? 0 : activity.completedDays;
+    if (activity.completed) {
+      const surveyFacts: JourneyFact[] = [
+        {
+          id: "fact.cape-landmark-survey",
+          type: "landmark",
+          status: "confirmed",
+          confidence: 80,
+          source: "two-day Cape survey",
+          observedDate: date,
+          claim: "The recognised Cape landmark was surveyed over two complete days.",
+        },
+        {
+          id: "fact.cape-water-source",
+          type: "water_source",
+          status: "observed",
+          confidence: 70,
+          source: "two-day Cape survey",
+          observedDate: date,
+          claim: "A usable fresh-water source is available at the Cape anchorage.",
+        },
+        {
+          id: "fact.cape-hazard",
+          type: "hazard",
+          status: "observed",
+          confidence: 60,
+          source: "two-day Cape survey",
+          observedDate: date,
+          claim: "The Cape approach has dangerous breaking seas in adverse weather.",
+        },
+      ];
+      for (const fact of surveyFacts) {
+        const existing = journeyFacts.findIndex((candidate) => candidate.id === fact.id);
+        if (existing === -1) journeyFacts.push(fact);
+        else journeyFacts[existing] = fact;
+      }
+      surveyedLandmarkIds = [...surveyedLandmarkIds, LANDMARK_IDS.capeGoal];
+      activity = { ...activity, factsLearned: surveyFacts.map((fact) => fact.id) };
+    }
+  } else if (activity.kind === "cape_water_collection") {
+    const waterCapacity = SURVIVAL_TUNING.stores.water.capKg - stores.waterKg;
+    const holdCapacity = SURVIVAL_TUNING.hold.allocatableKg - holdUsedKg(stores);
+    const collected = Math.min(12_000, waterCapacity, holdCapacity);
+    const appended = appendBatch(
+      batches,
+      "water",
+      "cape",
+      date,
+      collected,
+      nextBatchSequence,
+    );
+    batches = appended.batches;
+    nextBatchSequence = appended.nextSequence;
+    stores = { ...stores, waterKg: stores.waterKg + collected };
+    capeWaterCollectedKg += collected;
+    activity = { kind: "cape_water_collection", waterCollectedKg: collected };
   }
 
   const hadZeroWaterWarning = warningIsActive(state.survival.warnings, "zero_water");
@@ -1415,7 +1906,49 @@ function advanceSurvivalDay(
       moraleRestoredBps: moraleBps - beforeMorale,
     };
   }
-  const crew = { ...state.crew, healthBps, moraleBps };
+  let crew = { ...state.crew, healthBps, moraleBps };
+  let journeyFlags = state.format === JOURNEY_STATE_FORMAT ? [...state.journey.flags] : [];
+  let scheduledConsequences = state.format === JOURNEY_STATE_FORMAT
+    ? state.journey.scheduledConsequences.map((item) => ({ ...item, effects: copyEventEffects(item.effects) }))
+    : [];
+  let expeditionIntent = state.survival.expeditionIntent;
+  let terminalEventReason: "mutiny_seizure" | "authored_abandonment" | null = null;
+  const delayedLogs: DelayedConsequenceLog[] = [];
+  let forcedFollowUpEventId: string | null = null;
+  if (state.format === JOURNEY_STATE_FORMAT) {
+    const due = scheduledConsequences.filter((item) => item.dueCommittedDay <= committedDay);
+    scheduledConsequences = scheduledConsequences.filter((item) => item.dueCommittedDay > committedDay);
+    for (const consequence of due) {
+      const applied = applyJourneyEffects({
+        stores,
+        batches,
+        crew,
+        ship,
+        moneyDucats,
+        flags: journeyFlags,
+        facts: journeyFacts,
+        expeditionIntent,
+        terminalReason: terminalEventReason,
+      }, consequence.effects, date);
+      stores = applied.stores;
+      batches = applied.batches;
+      crew = applied.crew;
+      ship = applied.ship;
+      moneyDucats = applied.moneyDucats;
+      journeyFlags = [...applied.flags];
+      journeyFacts = applied.facts.map(copyJourneyFact);
+      expeditionIntent = applied.expeditionIntent;
+      terminalEventReason = applied.terminalReason;
+      delayedLogs.push({
+        id: consequence.id,
+        sourceEventId: consequence.sourceEventId,
+        text: consequence.logText,
+      });
+      if (forcedFollowUpEventId === null && consequence.followUpEventId !== null) {
+        forcedFollowUpEventId = consequence.followUpEventId;
+      }
+    }
+  }
 
   let warnings = syncStoreWarnings(
     state.survival.warnings,
@@ -1444,6 +1977,191 @@ function advanceSurvivalDay(
     survivalInterrupt = { kind: "warning", warnings: newlyVisibleWarnings };
   }
 
+  if (state.format === JOURNEY_STATE_FORMAT) {
+    let journeyLocation = state.journey.location;
+    let outcome = copyOutcome(state.journey.outcome);
+    if (
+      outcome === null
+      && landfall.kind === "recognised"
+      && landfall.landmarkId === LANDMARK_IDS.lisbon
+      && state.survival.lifecycle === "underway"
+      && state.journey.location !== "lisbon"
+    ) {
+      journeyLocation = "lisbon";
+      outcome = currentRunOutcome(
+        state.journey.objectiveAchieved ? "full_success" : "partial_return",
+        state.journey.objectiveAchieved
+          ? "The recognised Cape objective was followed by a true-position return to Lisbon."
+          : "The expedition returned to Lisbon without completing the recognised Cape objective.",
+        committedDay,
+        state.journey.objectiveAchieved,
+        expeditionIntent,
+        crew,
+        ship,
+        stores,
+        journeyFacts.length,
+      );
+    }
+    if (outcome === null && terminalEventReason !== null) {
+      outcome = currentRunOutcome(
+        "objective_failure",
+        terminalEventReason === "mutiny_seizure"
+          ? "The staged mutiny culminated in seizure of command."
+          : "An authored abandonment ended the current expedition.",
+        committedDay,
+        state.journey.objectiveAchieved,
+        expeditionIntent,
+        crew,
+        ship,
+        stores,
+        journeyFacts.length,
+      );
+    }
+    if (outcome === null && status.kind === "terminal") {
+      outcome = currentRunOutcome(
+        "objective_failure",
+        status.message,
+        committedDay,
+        state.journey.objectiveAchieved,
+        expeditionIntent,
+        crew,
+        ship,
+        stores,
+        journeyFacts.length,
+      );
+    }
+
+    const interim = {
+      ...detachedState(state) as JourneySimulationState,
+      committedDay,
+      date,
+      truePosition,
+      estimatedPosition,
+      uncertainty,
+      crew,
+      stores,
+      moneyDucats,
+      ship,
+      prng: nextMovementPrng,
+      navigation: {
+        environmentModel: state.navigation.environmentModel,
+        environmentPrng: nextEnvironmentPrng,
+        weatherState: nextWeatherState,
+        observedWeather,
+        observedWind,
+        knowledge,
+        lastObservation: observation,
+        lastLandfall: landfall,
+        interruption: navigationInterrupt,
+      },
+      survival: {
+        ...state.survival,
+        location: journeyLocation === "lisbon" ? "lisbon" : state.survival.location,
+        batches,
+        nextBatchSequence,
+        foulingSpeedLossBps,
+        careeningDaysCompleted,
+        warnings,
+        zeroWaterPressureDays: stores.waterKg === 0
+          ? (waterPressure ? state.survival.zeroWaterPressureDays + 1 : 0)
+          : 0,
+        zeroProvisionPressureDays: stores.provisionsKg === 0
+          ? (provisionPressure ? state.survival.zeroProvisionPressureDays + 1 : 0)
+          : 0,
+        status,
+        interruption: survivalInterrupt,
+        expeditionIntent,
+      },
+      journey: {
+        ...state.journey,
+        location: journeyLocation,
+        capeSurveyDaysCompleted,
+        surveyedLandmarkIds,
+        capeWaterCollectedKg,
+        facts: journeyFacts,
+        flags: journeyFlags,
+        pendingEvent: null,
+        scheduledConsequences,
+        outcome,
+      },
+    } satisfies JourneySimulationState;
+
+    let pendingEvent = null as JourneySimulationState["journey"]["pendingEvent"];
+    let eventPrng = interim.journey.eventPrng;
+    if (outcome === null) {
+      if (forcedFollowUpEventId !== null) {
+        const followUp = authoredEventById(forcedFollowUpEventId);
+        if (followUp === undefined) {
+          throw new SimulationValidationError(`scheduled follow-up event ${forcedFollowUpEventId} is unknown`);
+        }
+        pendingEvent = presentEvent(interim, followUp);
+      } else {
+        const selected = selectDailyEvent(interim);
+        pendingEvent = selected.pendingEvent;
+        eventPrng = selected.eventPrng;
+      }
+    }
+    const eventHistory = pendingEvent === null
+      ? state.journey.eventHistory.map((item) => ({ ...item }))
+      : [...state.journey.eventHistory.map((item) => ({ ...item })), {
+          eventId: pendingEvent.eventId,
+          presentedDay: committedDay,
+          leg: state.journey.leg,
+          choiceId: null,
+        }];
+    const firedThisLeg = pendingEvent === null || state.journey.firedThisLeg.includes(pendingEvent.eventId)
+      ? [...state.journey.firedThisLeg]
+      : [...state.journey.firedThisLeg, pendingEvent.eventId];
+    const entry: JourneyDayLogEntry = {
+      index: state.canonicalLog.length,
+      type: "journey_day",
+      committedDay,
+      date,
+      phaseOrder: [...DAY_PHASE_ORDER],
+      heading: state.heading,
+      sailingPolicy: state.sailingPolicy,
+      rationPolicy: state.rationPolicy,
+      environmentId,
+      estimatedPosition,
+      uncertainty,
+      waterConsumedKg: water.consumedKg,
+      provisionsConsumedKg: provisions.consumedKg,
+      provisionsSpoiledKg: spoiled.spoiledKg,
+      observedWeather,
+      observedWind,
+      observation,
+      landfall,
+      event: pendingEvent === null
+        ? "none"
+        : {
+            eventId: pendingEvent.eventId,
+            title: pendingEvent.title,
+            text: pendingEvent.text,
+            warningStage: pendingEvent.warningStage,
+          },
+      delayedConsequences: delayedLogs,
+      activity,
+      foulingSpeedLossBps,
+      warnings: warnings.map(copySurvivalWarning),
+      status: copySurvivalStatus(status),
+      interruption: copySurvivalInterrupt(survivalInterrupt),
+      journeyLocation,
+      outcome: copyOutcome(outcome),
+    };
+    return finalizeState({
+      ...interim,
+      journey: {
+        ...interim.journey,
+        eventPrng,
+        pendingEvent,
+        eventHistory,
+        firedThisLeg,
+      },
+      canonicalLog: [...state.canonicalLog.map(copyLogEntry), entry],
+      replayCommands: [...state.replayCommands.map(copyCommand), copyCommand(command)],
+    });
+  }
+
   const entry: SurvivalDayLogEntry = {
     index: state.canonicalLog.length,
     type: "survival_day",
@@ -1464,7 +2182,7 @@ function advanceSurvivalDay(
     observation,
     landfall,
     event: "none",
-    activity,
+    activity: activity as SurvivalDayActivityResult,
     foulingSpeedLossBps,
     warnings: warnings.map(copySurvivalWarning),
     status: copySurvivalStatus(status),
@@ -1528,11 +2246,11 @@ type SurvivalActionCommand = Extract<
 >;
 
 function finalizeSurvivalAction(
-  prior: Readonly<SurvivalSimulationState>,
-  next: SurvivalSimulationState,
+  prior: Readonly<SurvivalSimulationState | JourneySimulationState>,
+  next: SurvivalSimulationState | JourneySimulationState,
   command: Readonly<SurvivalActionCommand>,
   result: SurvivalActionResult,
-): SurvivalSimulationState {
+): SurvivalSimulationState | JourneySimulationState {
   const entry: SurvivalActionLogEntry = {
     index: prior.canonicalLog.length,
     type: "survival_action",
@@ -1563,9 +2281,9 @@ function immediateStoreWarnings(
 }
 
 function applySurvivalAction(
-  state: Readonly<SurvivalSimulationState>,
+  state: Readonly<SurvivalSimulationState | JourneySimulationState>,
   command: Readonly<SurvivalActionCommand>,
-): SurvivalSimulationState {
+): SurvivalSimulationState | JourneySimulationState {
   if (state.survival.status.kind === "terminal") {
     throw new SimulationValidationError("a terminal expedition cannot accept another command");
   }
@@ -1637,6 +2355,14 @@ function applySurvivalAction(
           ? { kind: "warning" as const, warnings: warnings.map((warning) => warning.code) }
           : { kind: "none" as const },
       },
+      ...(state.format === JOURNEY_STATE_FORMAT ? {
+        journey: {
+          ...state.journey,
+          location: "at_sea" as const,
+          leg: state.journey.leg + 1,
+          firedThisLeg: [],
+        },
+      } : {}),
     };
     return finalizeSurvivalAction(state, next, command, {
       kind: "departed_lisbon",
@@ -1656,6 +2382,9 @@ function applySurvivalAction(
     const next = {
       ...detachedState(state) as SurvivalSimulationState,
       survival: { ...state.survival, location: "cape_verde" as const },
+      ...(state.format === JOURNEY_STATE_FORMAT ? {
+        journey: { ...state.journey, location: "cape_verde" as const },
+      } : {}),
     };
     return finalizeSurvivalAction(state, next, command, { kind: "entered_cape_verde_port" });
   }
@@ -1678,6 +2407,14 @@ function applySurvivalAction(
         interruption: { kind: "none" as const },
       },
       survival: { ...state.survival, location: "at_sea" as const },
+      ...(state.format === JOURNEY_STATE_FORMAT ? {
+        journey: {
+          ...state.journey,
+          location: "at_sea" as const,
+          leg: state.journey.leg + 1,
+          firedThisLeg: [],
+        },
+      } : {}),
     };
     return finalizeSurvivalAction(state, next, command, { kind: "left_cape_verde_port" });
   }
@@ -1769,6 +2506,301 @@ function applySurvivalAction(
   });
 }
 
+function journeyActionLog(
+  prior: Readonly<JourneySimulationState>,
+  next: Readonly<JourneySimulationState>,
+  command: Readonly<Extract<SimulationCommand, {
+    readonly type:
+      | "purchase_cape_verde_rumour"
+      | "recognise_cape_landfall"
+      | "leave_cape"
+      | "choose_event";
+  }>>,
+  result: JourneyActionResult,
+  text: string,
+): JourneySimulationState {
+  const entry: JourneyActionLogEntry = {
+    index: prior.canonicalLog.length,
+    type: "journey_action",
+    committedDay: prior.committedDay,
+    result,
+    text,
+    outcome: copyOutcome(next.journey.outcome),
+  };
+  return finalizeState({
+    ...next,
+    canonicalLog: [...prior.canonicalLog.map(copyLogEntry), entry],
+    replayCommands: [...prior.replayCommands.map(copyCommand), copyCommand(command)],
+  });
+}
+
+const CAPE_VERDE_RUMOURS = [
+  {
+    id: "fact.cape-verde-false-island",
+    type: "rumour" as const,
+    status: "rumoured" as const,
+    confidence: 25,
+    source: "purchased Cape Verde rumour",
+    claim: "An uncertain island is said to lie west of the southern route.",
+    flag: "rumour_false_island",
+  },
+  {
+    id: "fact.cape-verde-southern-winds",
+    type: "rumour" as const,
+    status: "rumoured" as const,
+    confidence: 25,
+    source: "purchased Cape Verde rumour",
+    claim: "Sailors claim the southern ocean rewards a wide Atlantic sweep.",
+    flag: "rumour_southern_winds",
+  },
+  {
+    id: "fact.cape-verde-cape-water",
+    type: "rumour" as const,
+    status: "rumoured" as const,
+    confidence: 25,
+    source: "purchased Cape Verde rumour",
+    claim: "A doubtful account places fresh water near the Cape anchorage.",
+    flag: "rumour_cape_water",
+  },
+] as const;
+
+function applyJourneyAction(
+  state: Readonly<JourneySimulationState>,
+  command: Readonly<Extract<SimulationCommand, {
+    readonly type:
+      | "purchase_cape_verde_rumour"
+      | "recognise_cape_landfall"
+      | "leave_cape"
+      | "choose_event";
+  }>>,
+): JourneySimulationState {
+  if (command.type === "purchase_cape_verde_rumour") {
+    if (state.survival.location !== "cape_verde" || state.journey.location !== "cape_verde") {
+      throw new SimulationValidationError("the seeded rumour is available only at Cape Verde");
+    }
+    if (state.journey.rumourPurchased) {
+      throw new SimulationValidationError("only one Cape Verde rumour may be purchased per expedition");
+    }
+    if (state.moneyDucats < 10) {
+      throw new SimulationValidationError("insufficient funds for the 10 ducat Cape Verde rumour");
+    }
+    const draw = nextIntegerInclusive(state.journey.eventPrng, 0, CAPE_VERDE_RUMOURS.length - 1);
+    const selected = CAPE_VERDE_RUMOURS[draw.value]!;
+    const fact: JourneyFact = {
+      id: selected.id,
+      type: selected.type,
+      status: selected.status,
+      confidence: selected.confidence,
+      source: selected.source,
+      observedDate: state.date,
+      claim: selected.claim,
+    };
+    const next = {
+      ...detachedState(state) as JourneySimulationState,
+      moneyDucats: state.moneyDucats - 10,
+      journey: {
+        ...state.journey,
+        eventPrng: draw.state,
+        rumourPurchased: true,
+        facts: [...state.journey.facts.map(copyJourneyFact), fact],
+        flags: state.journey.flags.includes(selected.flag)
+          ? [...state.journey.flags]
+          : [...state.journey.flags, selected.flag],
+      },
+    };
+    return journeyActionLog(state, next, command, {
+      kind: "cape_verde_rumour_purchased",
+      factId: fact.id,
+      costDucats: 10,
+    }, `Ten ducats purchase one uncertain Cape Verde rumour at confidence 25: ${fact.claim}`);
+  }
+  if (command.type === "recognise_cape_landfall") {
+    if (
+      state.journey.location !== "at_sea"
+      || state.navigation.lastLandfall.kind !== "visible_unrecognised"
+      || state.navigation.lastLandfall.knownFactId !== LANDMARK_IDS.capeGoal
+    ) {
+      throw new SimulationValidationError("Cape recognition requires a true-position visible Cape landfall");
+    }
+    const cape = LANDMARKS.find((landmark) => landmark.id === LANDMARK_IDS.capeGoal)!;
+    const knowledge = state.navigation.knowledge.map((fact) => fact.id === LANDMARK_IDS.capeGoal
+      && fact.type === "landmark"
+      ? { ...fact, status: "confirmed" as const, confidence: Math.max(70, fact.confidence), claimedPosition: { ...cape.centre } }
+      : copyFact(fact));
+    const next = {
+      ...detachedState(state) as JourneySimulationState,
+      estimatedPosition: { ...cape.centre },
+      uncertainty: { eastWestMnm: cape.confirmedFixFloorMnm, northSouthMnm: cape.confirmedFixFloorMnm },
+      navigation: {
+        ...state.navigation,
+        knowledge,
+        lastLandfall: { kind: "recognised" as const, landmarkId: LANDMARK_IDS.capeGoal },
+        interruption: { kind: "landfall" as const, result: "recognised" as const },
+      },
+      journey: {
+        ...state.journey,
+        location: "cape" as const,
+        objectiveAchieved: true,
+        leg: state.journey.leg + 1,
+        firedThisLeg: [],
+      },
+    };
+    return journeyActionLog(state, next, command, {
+      kind: "cape_landfall_recognised",
+      landmarkId: LANDMARK_IDS.capeGoal,
+    }, "The true-position landfall is recognised as the authored Cape objective; the chart fix is recorded.");
+  }
+  if (command.type === "leave_cape") {
+    if (state.journey.location !== "cape") {
+      throw new SimulationValidationError("Cape departure requires the expedition to be at the Cape");
+    }
+    const next = {
+      ...detachedState(state) as JourneySimulationState,
+      navigation: {
+        ...state.navigation,
+        lastLandfall: { kind: "none" as const },
+        interruption: { kind: "none" as const },
+      },
+      survival: { ...state.survival, location: "at_sea" as const },
+      journey: {
+        ...state.journey,
+        location: "at_sea" as const,
+        capeSurveyDaysCompleted: 0,
+        leg: state.journey.leg + 1,
+        firedThisLeg: [],
+      },
+    };
+    return journeyActionLog(state, next, command, { kind: "left_cape" }, "The expedition leaves the Cape and begins the return leg.");
+  }
+
+  const pending = state.journey.pendingEvent;
+  if (pending === null) throw new SimulationValidationError("no event choice is pending");
+  if (command.eventId !== pending.eventId) {
+    throw new SimulationValidationError("event choice ID does not match the pending event");
+  }
+  const event = authoredEventById(command.eventId);
+  if (event === undefined) throw new SimulationValidationError("pending event ID is not in the authored catalogue");
+  const eventChoice = event.choices.find((item) => item.id === command.choiceId);
+  if (eventChoice === undefined) throw new SimulationValidationError("choice ID is not valid for the pending event");
+  const availability = choiceAvailability(state, eventChoice);
+  if (!availability.available) {
+    throw new SimulationValidationError(availability.reason ?? "the selected event choice is unavailable");
+  }
+  let applied = applyJourneyEffects({
+    stores: state.stores,
+    batches: state.survival.batches,
+    crew: state.crew,
+    ship: state.ship,
+    moneyDucats: state.moneyDucats,
+    flags: state.journey.flags,
+    facts: state.journey.facts,
+    expeditionIntent: state.survival.expeditionIntent,
+    terminalReason: null,
+  }, eventChoice.effects, state.date);
+  if (applied.crew.healthBps === 0 && event.warningStage === "none") {
+    applied = { ...applied, crew: { ...applied.crew, healthBps: 1 } };
+  }
+  const scheduled = (eventChoice.delayed ?? []).map((item, index) => ({
+    id: `consequence.${String(state.committedDay).padStart(6, "0")}.${String(state.journey.scheduledConsequences.length + index).padStart(4, "0")}`,
+    sourceEventId: event.id,
+    dueCommittedDay: state.committedDay + item.dueAfterDays,
+    logText: item.logText,
+    effects: copyEventEffects(item.effects),
+    followUpEventId: item.followUpEventId ?? null,
+  }));
+  let warnings = syncStoreWarnings(
+    state.survival.warnings,
+    applied.stores,
+    applied.batches,
+    state.date,
+    0,
+    state.committedDay,
+  );
+  warnings = syncConditionWarnings(warnings, applied.crew, applied.ship, state.committedDay);
+  let status = sailingCapabilityStatus(applied.crew, applied.ship);
+  if (
+    applied.ship.hullBps === 0
+    && (warningIsActive(state.survival.warnings, "hull_danger")
+      || (event.warningStage !== "none" && state.journey.flags.includes("storm_warned")))
+  ) {
+    status = {
+      kind: "terminal",
+      reason: "ship_lost",
+      message: "A foreshadowed event consequence has resulted in loss of the ship.",
+    };
+  }
+  const interruption = interruptForStatus(status);
+  let outcome = copyOutcome(state.journey.outcome);
+  if (applied.terminalReason !== null) {
+    outcome = currentRunOutcome(
+      "objective_failure",
+      applied.terminalReason === "mutiny_seizure"
+        ? "The staged mutiny culminated in seizure of command."
+        : "The expedition ended through an explicit authored abandonment choice.",
+      state.committedDay,
+      state.journey.objectiveAchieved,
+      applied.expeditionIntent,
+      applied.crew,
+      applied.ship,
+      applied.stores,
+      applied.facts.length,
+    );
+  } else if (status.kind === "terminal") {
+    outcome = currentRunOutcome(
+      "objective_failure",
+      status.message,
+      state.committedDay,
+      state.journey.objectiveAchieved,
+      applied.expeditionIntent,
+      applied.crew,
+      applied.ship,
+      applied.stores,
+      applied.facts.length,
+    );
+  }
+  const history = state.journey.eventHistory.map((item) =>
+    item.eventId === event.id && item.choiceId === null && item.presentedDay === pending.presentedDay
+      ? { ...item, choiceId: eventChoice.id }
+      : { ...item });
+  const beforeFactIds = new Set(state.journey.facts.map((fact) => fact.id));
+  const factsLearned = applied.facts.filter((fact) => !beforeFactIds.has(fact.id)).map((fact) => fact.id);
+  const next = {
+    ...detachedState(state) as JourneySimulationState,
+    stores: applied.stores,
+    crew: applied.crew,
+    ship: applied.ship,
+    moneyDucats: applied.moneyDucats,
+    survival: {
+      ...state.survival,
+      batches: applied.batches,
+      warnings,
+      status,
+      interruption,
+      expeditionIntent: applied.expeditionIntent,
+    },
+    journey: {
+      ...state.journey,
+      flags: [...applied.flags],
+      facts: applied.facts.map(copyJourneyFact),
+      pendingEvent: null,
+      scheduledConsequences: [
+        ...state.journey.scheduledConsequences.map((item) => ({ ...item, effects: copyEventEffects(item.effects) })),
+        ...scheduled,
+      ],
+      eventHistory: history,
+      outcome,
+    },
+  };
+  const result: JourneyActionResult = {
+    kind: "event_choice_resolved",
+    eventId: event.id,
+    choiceId: eventChoice.id,
+    scheduledConsequenceIds: scheduled.map((item) => item.id),
+    factsLearned,
+  };
+  return journeyActionLog(state, next, command, result, eventChoice.immediateLogText);
+}
+
 export function applyCommand(
   state: Readonly<LegacySimulationState>,
   command: Readonly<SimulationCommand>,
@@ -1785,6 +2817,11 @@ export function applyCommand(
   environmentProvider?: EnvironmentProvider,
 ): SurvivalSimulationState;
 export function applyCommand(
+  state: Readonly<JourneySimulationState>,
+  command: Readonly<SimulationCommand>,
+  environmentProvider?: EnvironmentProvider,
+): JourneySimulationState;
+export function applyCommand(
   state: Readonly<SimulationState>,
   command: Readonly<SimulationCommand>,
   environmentProvider?: EnvironmentProvider,
@@ -1799,6 +2836,44 @@ export function applyCommand(
   const setting = command.type === "set_heading"
     || command.type === "set_sailing_policy"
     || command.type === "set_ration_policy";
+  if (state.format === JOURNEY_STATE_FORMAT) {
+    if (state.journey.outcome !== null) {
+      throw new SimulationValidationError("a resolved expedition cannot accept further gameplay commands");
+    }
+    if (state.journey.pendingEvent !== null && command.type !== "choose_event") {
+      throw new SimulationValidationError("the pending event choice must be resolved before another command");
+    }
+    if (
+      command.type === "purchase_cape_verde_rumour"
+      || command.type === "recognise_cape_landfall"
+      || command.type === "leave_cape"
+      || command.type === "choose_event"
+    ) {
+      return applyJourneyAction(state, command);
+    }
+    if (command.type === "survey_cape_day" || command.type === "collect_cape_water") {
+      return advanceSurvivalDay(
+        state,
+        command,
+        environmentProvider ?? authoredAtlanticEnvironment,
+      ) as JourneySimulationState;
+    }
+    if (setting) return applySettingCommand(state, command) as JourneySimulationState;
+    if (
+      command.type === "advance_day"
+      || command.type === "rest_at_cape_verde"
+      || command.type === "repair_day"
+      || command.type === "careen_day_at_cape_verde"
+    ) {
+      return advanceSurvivalDay(
+        state,
+        command,
+        environmentProvider ?? authoredAtlanticEnvironment,
+      ) as JourneySimulationState;
+    }
+    const next = applySurvivalAction(state, command) as JourneySimulationState;
+    return next;
+  }
   if (state.format === SURVIVAL_STATE_FORMAT) {
     if (setting) return applySettingCommand(state, command) as SurvivalSimulationState;
     if (
@@ -1813,10 +2888,20 @@ export function applyCommand(
         environmentProvider ?? authoredAtlanticEnvironment,
       );
     }
-    return applySurvivalAction(state, command);
+    if (
+      command.type === "set_lisbon_outfitting"
+      || command.type === "depart_lisbon"
+      || command.type === "enter_cape_verde_port"
+      || command.type === "leave_cape_verde_port"
+      || command.type === "purchase_at_cape_verde"
+      || command.type === "set_expedition_intent"
+    ) {
+      return applySurvivalAction(state, command) as SurvivalSimulationState;
+    }
+    throw new SimulationValidationError("WP3 journey commands require state format v4");
   }
   if (!setting && command.type !== "advance_day") {
-    throw new SimulationValidationError("WP2 survival commands require state format v3");
+    throw new SimulationValidationError("WP2 and WP3 commands require their matching state format");
   }
   if (setting) {
     return applySettingCommand(state, command);
@@ -1839,6 +2924,10 @@ export function advanceDay(
   state: Readonly<SurvivalSimulationState>,
   environmentProvider?: EnvironmentProvider,
 ): SurvivalSimulationState;
+export function advanceDay(
+  state: Readonly<JourneySimulationState>,
+  environmentProvider?: EnvironmentProvider,
+): JourneySimulationState;
 export function advanceDay(
   state: Readonly<SimulationState>,
   environmentProvider?: EnvironmentProvider,
@@ -1866,6 +2955,45 @@ export function executeSurvivalCommand(
   return deepFreeze({ state: next, result: copyLogEntry(result) as SurvivalCommandResult });
 }
 
+export function executeJourneyCommand(
+  state: Readonly<JourneySimulationState>,
+  command: Readonly<SimulationCommand>,
+  environmentProvider?: EnvironmentProvider,
+): { readonly state: JourneySimulationState; readonly result: CanonicalLogEntry } {
+  const next = applyCommand(state, command, environmentProvider);
+  const result = next.canonicalLog.at(-1);
+  if (result === undefined) {
+    throw new SimulationValidationError("WP3 command did not produce a canonical result");
+  }
+  return deepFreeze({ state: next, result: copyLogEntry(result) });
+}
+
+function hasJourneyInterruption(state: Readonly<JourneySimulationState>): boolean {
+  return state.journey.pendingEvent !== null
+    || state.journey.outcome !== null
+    || state.navigation.interruption.kind !== "none"
+    || state.survival.interruption.kind !== "none"
+    || state.survival.status.kind !== "active"
+    || state.journey.location !== "at_sea";
+}
+
+export function advanceUntilInterrupted(
+  startingState: Readonly<JourneySimulationState>,
+  maximumDays = 365,
+  environmentProvider?: EnvironmentProvider,
+): JourneySimulationState {
+  if (!Number.isSafeInteger(maximumDays) || maximumDays < 1 || maximumDays > 10_000) {
+    throw new SimulationValidationError("maximumDays must be an integer from 1 to 10000");
+  }
+  let state = startingState as JourneySimulationState;
+  if (hasJourneyInterruption(state)) return state;
+  for (let day = 0; day < maximumDays; day += 1) {
+    state = applyCommand(state, { type: "advance_day" }, environmentProvider);
+    if (hasJourneyInterruption(state)) return state;
+  }
+  return state;
+}
+
 function basePlayerView(state: Readonly<SimulationState>) {
   return {
     contentVersion: state.contentVersion,
@@ -1887,6 +3015,53 @@ function basePlayerView(state: Readonly<SimulationState>) {
 export function getPlayerView(state: Readonly<SimulationState>): PlayerView {
   assertSimulationState(state);
   const base = basePlayerView(state);
+  if (state.format === JOURNEY_STATE_FORMAT) {
+    return deepFreeze({
+      ...base,
+      navigation: {
+        observedWeather: state.navigation.observedWeather,
+        observedWind: { ...state.navigation.observedWind },
+        knownFacts: state.navigation.knowledge.map(copyFact),
+        observation: copyObservation(state.navigation.lastObservation),
+        landfall: copyLandfall(state.navigation.lastLandfall),
+        interruption: copyInterrupt(state.navigation.interruption),
+      },
+      survival: {
+        lifecycle: state.survival.lifecycle,
+        location: state.survival.location,
+        allocatableHoldUsedKg: holdUsedKg(state.stores),
+        allocatableHoldRemainingKg: SURVIVAL_TUNING.hold.allocatableKg - holdUsedKg(state.stores),
+        fixedMissionAllocationKg: SURVIVAL_TUNING.hold.fixedMissionAllocationKg,
+        totalHoldKg: SURVIVAL_TUNING.hold.totalKg,
+        batches: copyBatches(state.survival.batches),
+        capeVerdeStock: state.survival.location === "cape_verde"
+          ? { ...state.survival.capeVerdeStock }
+          : null,
+        foulingSpeedLossBps: state.survival.foulingSpeedLossBps,
+        careeningDaysCompleted: state.survival.careeningDaysCompleted,
+        warnings: state.survival.warnings.map(copySurvivalWarning),
+        status: copySurvivalStatus(state.survival.status),
+        interruption: copySurvivalInterrupt(state.survival.interruption),
+        expeditionIntent: state.survival.expeditionIntent,
+      },
+      journey: {
+        location: state.journey.location,
+        objectiveAchieved: state.journey.objectiveAchieved,
+        rumourPurchased: state.journey.rumourPurchased,
+        capeSurveyDaysCompleted: state.journey.capeSurveyDaysCompleted,
+        surveyedLandmarkIds: [...state.journey.surveyedLandmarkIds],
+        capeWaterCollectedKg: state.journey.capeWaterCollectedKg,
+        knownFacts: state.journey.facts.map(copyJourneyFact),
+        pendingEvent: state.journey.pendingEvent === null
+          ? null
+          : {
+              ...state.journey.pendingEvent,
+              choices: state.journey.pendingEvent.choices.map((item) => ({ ...item })),
+            },
+        outcome: copyOutcome(state.journey.outcome),
+      },
+    }) as JourneyPlayerView;
+  }
   if (state.format === SURVIVAL_STATE_FORMAT) {
     return deepFreeze({
       ...base,

@@ -1,12 +1,15 @@
 export const STATE_FORMAT = "age-of-exploration-state-v1" as const;
 export const NAVIGATION_STATE_FORMAT = "age-of-exploration-state-v2" as const;
 export const SURVIVAL_STATE_FORMAT = "age-of-exploration-state-v3" as const;
+export const JOURNEY_STATE_FORMAT = "age-of-exploration-state-v4" as const;
 export const SAVE_FORMAT = "age-of-exploration-save-v1" as const;
 export const NAVIGATION_SAVE_FORMAT = "age-of-exploration-save-v2" as const;
 export const SURVIVAL_SAVE_FORMAT = "age-of-exploration-save-v3" as const;
+export const JOURNEY_SAVE_FORMAT = "age-of-exploration-save-v4" as const;
 export const REPLAY_FORMAT = "age-of-exploration-replay-v1" as const;
 export const NAVIGATION_REPLAY_FORMAT = "age-of-exploration-replay-v2" as const;
 export const SURVIVAL_REPLAY_FORMAT = "age-of-exploration-replay-v3" as const;
+export const JOURNEY_REPLAY_FORMAT = "age-of-exploration-replay-v4" as const;
 export const PRNG_ALGORITHM = "xoshiro128ss-v1" as const;
 
 export const HEADINGS = [
@@ -65,6 +68,14 @@ export const SURVIVAL_WARNING_CODES = [
   "hull_danger",
   "crew_health_danger",
 ] as const;
+export const EVENT_CATEGORIES = ["weather", "stores", "ship", "crew", "navigation"] as const;
+export const JOURNEY_LOCATIONS = ["lisbon", "at_sea", "cape_verde", "cape"] as const;
+export const JOURNEY_FACT_TYPES = [
+  "rumour", "landmark", "water_source", "current", "hazard", "anchorage",
+] as const;
+export const RUN_OUTCOME_IDS = [
+  "full_success", "report_success", "partial_return", "objective_failure",
+] as const;
 
 export const DAY_PHASE_ORDER = [
   "lock_orders",
@@ -89,6 +100,10 @@ export type ShipComponent = (typeof SHIP_COMPONENTS)[number];
 export type SurvivalLocation = (typeof SURVIVAL_LOCATIONS)[number];
 export type ExpeditionIntent = (typeof EXPEDITION_INTENTS)[number];
 export type SurvivalWarningCode = (typeof SURVIVAL_WARNING_CODES)[number];
+export type EventCategory = (typeof EVENT_CATEGORIES)[number];
+export type JourneyLocation = (typeof JOURNEY_LOCATIONS)[number];
+export type JourneyFactType = (typeof JOURNEY_FACT_TYPES)[number];
+export type RunOutcomeId = (typeof RUN_OUTCOME_IDS)[number];
 export type DayPhase = (typeof DAY_PHASE_ORDER)[number];
 
 export interface PositionMnm {
@@ -125,7 +140,7 @@ export interface ShipState {
 export interface StoreBatch {
   readonly id: string;
   readonly store: "water" | "provisions";
-  readonly source: "lisbon" | "cape_verde";
+  readonly source: "lisbon" | "cape_verde" | "cape";
   readonly acquiredDate: string;
   readonly remainingKg: number;
 }
@@ -321,6 +336,40 @@ export interface SetExpeditionIntentCommand {
   readonly intent: ExpeditionIntent;
 }
 
+export interface PurchaseCapeVerdeRumourCommand {
+  readonly type: "purchase_cape_verde_rumour";
+}
+
+export interface RecogniseCapeLandfallCommand {
+  readonly type: "recognise_cape_landfall";
+}
+
+export interface SurveyCapeDayCommand {
+  readonly type: "survey_cape_day";
+}
+
+export interface CollectCapeWaterCommand {
+  readonly type: "collect_cape_water";
+}
+
+export interface LeaveCapeCommand {
+  readonly type: "leave_cape";
+}
+
+export interface ChooseEventCommand {
+  readonly type: "choose_event";
+  readonly eventId: string;
+  readonly choiceId: string;
+}
+
+export type JourneyOnlyCommand =
+  | PurchaseCapeVerdeRumourCommand
+  | RecogniseCapeLandfallCommand
+  | SurveyCapeDayCommand
+  | CollectCapeWaterCommand
+  | LeaveCapeCommand
+  | ChooseEventCommand;
+
 export type SurvivalOnlyCommand =
   | SetLisbonOutfittingCommand
   | DepartLisbonCommand
@@ -337,7 +386,8 @@ export type SimulationCommand =
   | SetSailingPolicyCommand
   | SetRationPolicyCommand
   | AdvanceDayCommand
-  | SurvivalOnlyCommand;
+  | SurvivalOnlyCommand
+  | JourneyOnlyCommand;
 
 export interface CommandLogEntry {
   readonly index: number;
@@ -473,6 +523,277 @@ export interface SurvivalDayLogEntry {
   readonly interruption: SurvivalInterrupt;
 }
 
+export type EventWarningStage = "none" | "warning" | "threat" | "terminal";
+export type EventMitigationResource =
+  | "days"
+  | "stores"
+  | "money"
+  | "morale"
+  | "repair_capacity"
+  | "preparation"
+  | "objective";
+
+export interface EventChoiceRequirement {
+  readonly minimumMoneyDucats?: number;
+  readonly minimumWaterKg?: number;
+  readonly minimumProvisionsKg?: number;
+  readonly minimumRepairStoresKg?: number;
+  readonly minimumMedicineKg?: number;
+  readonly minimumMoraleBps?: number;
+  readonly requiredFlags?: readonly string[];
+}
+
+export interface JourneyFactEffect {
+  readonly id: string;
+  readonly type: JourneyFactType;
+  readonly status: NavigationFactStatus;
+  readonly confidence: number;
+  readonly source: string;
+  readonly claim: string;
+}
+
+export interface EventEffects {
+  readonly waterDeltaKg?: number;
+  readonly provisionsDeltaKg?: number;
+  readonly repairStoresDeltaKg?: number;
+  readonly medicineDeltaKg?: number;
+  readonly moneyDeltaDucats?: number;
+  readonly crewHealthDeltaBps?: number;
+  readonly crewMoraleDeltaBps?: number;
+  readonly ableCrewDelta?: number;
+  readonly hullDeltaBps?: number;
+  readonly mastDeltaBps?: number;
+  readonly sailsDeltaBps?: number;
+  readonly rudderDeltaBps?: number;
+  readonly setFlags?: readonly string[];
+  readonly clearFlags?: readonly string[];
+  readonly facts?: readonly JourneyFactEffect[];
+  readonly abandonObjective?: boolean;
+  readonly terminalReason?: "mutiny_seizure" | "authored_abandonment";
+}
+
+export interface DelayedConsequenceSpec {
+  readonly id: string;
+  readonly dueAfterDays: number;
+  readonly logText: string;
+  readonly effects: EventEffects;
+  readonly followUpEventId?: string;
+}
+
+export interface EventChoiceDefinition {
+  readonly id: string;
+  readonly label: string;
+  readonly requirement: EventChoiceRequirement;
+  readonly mitigationResource: EventMitigationResource;
+  readonly immediateLogText: string;
+  readonly effects: EventEffects;
+  readonly delayed?: readonly DelayedConsequenceSpec[];
+}
+
+export interface EventHardGates {
+  readonly regions?: readonly ("north_atlantic" | "south_atlantic" | "cape_verde" | "cape")[];
+  readonly seasons?: readonly ("winter" | "spring" | "summer" | "autumn")[];
+  readonly weatherKinds?: readonly WeatherKind[];
+  readonly requiredFlags?: readonly string[];
+  readonly forbiddenFlags?: readonly string[];
+  readonly maximumMoraleBps?: number;
+  readonly maximumHealthBps?: number;
+  readonly maximumShipComponent?: {
+    readonly component: ShipComponent;
+    readonly bps: number;
+  };
+  readonly minimumCommittedDay?: number;
+}
+
+export interface EventWeightModifier {
+  readonly kind:
+    | "press_on"
+    | "cautious"
+    | "old_water"
+    | "low_morale"
+    | "low_health"
+    | "damaged_ship"
+    | "prepared_flag";
+  readonly addWeight: number;
+  readonly flag?: string;
+}
+
+export interface RememberedEventText {
+  readonly requiredFlag: string;
+  readonly text: string;
+}
+
+export interface EventDefinition {
+  readonly id: string;
+  readonly category: EventCategory;
+  readonly title: string;
+  readonly logText: string;
+  readonly rememberedText: readonly RememberedEventText[];
+  readonly hardGates: EventHardGates;
+  readonly baseWeight: number;
+  readonly weightModifiers: readonly EventWeightModifier[];
+  readonly cooldownDays: number;
+  readonly oncePerLeg: boolean;
+  readonly warningStage: EventWarningStage;
+  readonly choices: readonly EventChoiceDefinition[];
+  readonly traits: {
+    readonly delayed: boolean;
+    readonly remembered: boolean;
+    readonly preparationSoftened: boolean;
+    readonly factProducing: boolean;
+  };
+}
+
+export interface EventChoiceAvailability {
+  readonly id: string;
+  readonly label: string;
+  readonly available: boolean;
+  readonly reason: string | null;
+}
+
+export interface PendingChoiceEvent {
+  readonly eventId: string;
+  readonly title: string;
+  readonly text: string;
+  readonly presentedDay: number;
+  readonly warningStage: EventWarningStage;
+  readonly choices: readonly EventChoiceAvailability[];
+}
+
+export interface ScheduledConsequence {
+  readonly id: string;
+  readonly sourceEventId: string;
+  readonly dueCommittedDay: number;
+  readonly logText: string;
+  readonly effects: EventEffects;
+  readonly followUpEventId: string | null;
+}
+
+export interface EventHistoryEntry {
+  readonly eventId: string;
+  readonly presentedDay: number;
+  readonly leg: number;
+  readonly choiceId: string | null;
+}
+
+export interface JourneyFact {
+  readonly id: string;
+  readonly type: JourneyFactType;
+  readonly status: NavigationFactStatus;
+  readonly confidence: number;
+  readonly source: string;
+  readonly observedDate: string;
+  readonly claim: string;
+}
+
+export interface RunOutcome {
+  readonly id: RunOutcomeId;
+  readonly reason: string;
+  readonly day: number;
+  readonly objectiveStatus: "achieved" | "not_achieved" | "abandoned";
+  readonly crew: CrewState;
+  readonly ship: ShipState;
+  readonly stores: StoresState;
+  readonly factsCarried: number;
+}
+
+export interface JourneyState {
+  readonly eventModel: "authored-journey-events-v1";
+  readonly eventPrng: PrngState;
+  readonly dailyEventChancePermille: number;
+  readonly location: JourneyLocation;
+  readonly leg: number;
+  readonly objectiveAchieved: boolean;
+  readonly rumourPurchased: boolean;
+  readonly capeSurveyDaysCompleted: number;
+  readonly surveyedLandmarkIds: readonly string[];
+  readonly capeWaterCollectedKg: number;
+  readonly facts: readonly JourneyFact[];
+  readonly flags: readonly string[];
+  readonly pendingEvent: PendingChoiceEvent | null;
+  readonly scheduledConsequences: readonly ScheduledConsequence[];
+  readonly eventHistory: readonly EventHistoryEntry[];
+  readonly firedThisLeg: readonly string[];
+  readonly outcome: RunOutcome | null;
+}
+
+export type JourneyDayActivityResult =
+  | SurvivalDayActivityResult
+  | {
+      readonly kind: "cape_survey";
+      readonly completedDays: number;
+      readonly completed: boolean;
+      readonly factsLearned: readonly string[];
+    }
+  | {
+      readonly kind: "cape_water_collection";
+      readonly waterCollectedKg: number;
+    };
+
+export interface EventPresentationLog {
+  readonly eventId: string;
+  readonly title: string;
+  readonly text: string;
+  readonly warningStage: EventWarningStage;
+}
+
+export interface DelayedConsequenceLog {
+  readonly id: string;
+  readonly sourceEventId: string;
+  readonly text: string;
+}
+
+export interface JourneyDayLogEntry {
+  readonly index: number;
+  readonly type: "journey_day";
+  readonly committedDay: number;
+  readonly date: string;
+  readonly phaseOrder: readonly DayPhase[];
+  readonly heading: Heading;
+  readonly sailingPolicy: SailingPolicy;
+  readonly rationPolicy: RationPolicy;
+  readonly environmentId: string;
+  readonly estimatedPosition: PositionMnm;
+  readonly uncertainty: UncertaintyRadiiMnm;
+  readonly waterConsumedKg: number;
+  readonly provisionsConsumedKg: number;
+  readonly provisionsSpoiledKg: number;
+  readonly observedWeather: WeatherKind;
+  readonly observedWind: ObservedWind;
+  readonly observation: ObservationResult;
+  readonly landfall: LandfallResult;
+  readonly event: "none" | EventPresentationLog;
+  readonly delayedConsequences: readonly DelayedConsequenceLog[];
+  readonly activity: JourneyDayActivityResult;
+  readonly foulingSpeedLossBps: number;
+  readonly warnings: readonly SurvivalWarning[];
+  readonly status: SurvivalStatus;
+  readonly interruption: SurvivalInterrupt;
+  readonly journeyLocation: JourneyLocation;
+  readonly outcome: RunOutcome | null;
+}
+
+export type JourneyActionResult =
+  | { readonly kind: "cape_verde_rumour_purchased"; readonly factId: string; readonly costDucats: 10 }
+  | { readonly kind: "cape_landfall_recognised"; readonly landmarkId: string }
+  | { readonly kind: "left_cape" }
+  | {
+      readonly kind: "event_choice_resolved";
+      readonly eventId: string;
+      readonly choiceId: string;
+      readonly scheduledConsequenceIds: readonly string[];
+      readonly factsLearned: readonly string[];
+    };
+
+export interface JourneyActionLogEntry {
+  readonly index: number;
+  readonly type: "journey_action";
+  readonly committedDay: number;
+  readonly result: JourneyActionResult;
+  readonly text: string;
+  readonly outcome: RunOutcome | null;
+}
+
 export type SurvivalCommandResult = SurvivalActionLogEntry | SurvivalDayLogEntry | CommandLogEntry;
 
 export type CanonicalLogEntry =
@@ -480,7 +801,9 @@ export type CanonicalLogEntry =
   | DayLogEntry
   | NavigationDayLogEntry
   | SurvivalActionLogEntry
-  | SurvivalDayLogEntry;
+  | SurvivalDayLogEntry
+  | JourneyDayLogEntry
+  | JourneyActionLogEntry;
 
 interface SimulationStateBase {
   readonly contentVersion: string;
@@ -517,10 +840,18 @@ export interface SurvivalSimulationState extends SimulationStateBase {
   readonly survival: SurvivalState;
 }
 
+export interface JourneySimulationState extends SimulationStateBase {
+  readonly format: typeof JOURNEY_STATE_FORMAT;
+  readonly navigation: NavigationState;
+  readonly survival: SurvivalState;
+  readonly journey: JourneyState;
+}
+
 export type SimulationState =
   | LegacySimulationState
   | NavigationSimulationState
-  | SurvivalSimulationState;
+  | SurvivalSimulationState
+  | JourneySimulationState;
 
 export interface InitialStateConfig {
   readonly contentVersion: string;
@@ -557,6 +888,34 @@ export interface SurvivalInitialStateConfig {
   readonly rationPolicy?: RationPolicy;
   readonly initialWeather?: WeatherKind;
   readonly knowledge?: readonly NavigationFact[];
+}
+
+export interface JourneyInitialStateConfig extends SurvivalInitialStateConfig {
+  readonly dailyEventChancePermille?: number;
+}
+
+export interface JourneyFixtureConfig extends JourneyInitialStateConfig {
+  readonly lifecycle?: "outfitting" | "underway";
+  readonly location?: JourneyLocation;
+  readonly truePosition?: PositionMnm;
+  readonly estimatedPosition?: PositionMnm;
+  readonly waterKg?: number;
+  readonly provisionsKg?: number;
+  readonly repairStoresKg?: number;
+  readonly medicineKg?: number;
+  readonly moneyDucats?: number;
+  readonly crewCount?: number;
+  readonly ableCrew?: number;
+  readonly healthBps?: number;
+  readonly moraleBps?: number;
+  readonly hullBps?: number;
+  readonly mastBps?: number;
+  readonly sailsBps?: number;
+  readonly rudderBps?: number;
+  readonly objectiveAchieved?: boolean;
+  readonly flags?: readonly string[];
+  readonly facts?: readonly JourneyFact[];
+  readonly rumourPurchased?: boolean;
 }
 
 export interface CapeVerdePortFixtureConfig extends SurvivalInitialStateConfig {
@@ -680,7 +1039,27 @@ export interface SurvivalPlayerView extends PlayerViewBase {
   };
 }
 
-export type PlayerView = LegacyPlayerView | NavigationPlayerView | SurvivalPlayerView;
+export interface JourneyPlayerView extends PlayerViewBase {
+  readonly navigation: NavigationPlayerView["navigation"];
+  readonly survival: SurvivalPlayerView["survival"];
+  readonly journey: {
+    readonly location: JourneyLocation;
+    readonly objectiveAchieved: boolean;
+    readonly rumourPurchased: boolean;
+    readonly capeSurveyDaysCompleted: number;
+    readonly surveyedLandmarkIds: readonly string[];
+    readonly capeWaterCollectedKg: number;
+    readonly knownFacts: readonly JourneyFact[];
+    readonly pendingEvent: PendingChoiceEvent | null;
+    readonly outcome: RunOutcome | null;
+  };
+}
+
+export type PlayerView =
+  | LegacyPlayerView
+  | NavigationPlayerView
+  | SurvivalPlayerView
+  | JourneyPlayerView;
 
 export interface LegacySaveEnvelope {
   readonly format: typeof SAVE_FORMAT;
@@ -697,13 +1076,23 @@ export interface SurvivalSaveEnvelope {
   readonly state: SurvivalSimulationState;
 }
 
-export type SaveEnvelope = LegacySaveEnvelope | NavigationSaveEnvelope | SurvivalSaveEnvelope;
+export interface JourneySaveEnvelope {
+  readonly format: typeof JOURNEY_SAVE_FORMAT;
+  readonly state: JourneySimulationState;
+}
+
+export type SaveEnvelope =
+  | LegacySaveEnvelope
+  | NavigationSaveEnvelope
+  | SurvivalSaveEnvelope
+  | JourneySaveEnvelope;
 
 export interface ReplayRecord {
   readonly format:
     | typeof REPLAY_FORMAT
     | typeof NAVIGATION_REPLAY_FORMAT
-    | typeof SURVIVAL_REPLAY_FORMAT;
+    | typeof SURVIVAL_REPLAY_FORMAT
+    | typeof JOURNEY_REPLAY_FORMAT;
   readonly contentVersion: string;
   readonly runSeed: string;
   readonly startingStateHash: string;

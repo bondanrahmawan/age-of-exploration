@@ -4,6 +4,8 @@ import { deepFreeze } from "./immutable.js";
 import {
   NAVIGATION_SAVE_FORMAT,
   NAVIGATION_STATE_FORMAT,
+  JOURNEY_SAVE_FORMAT,
+  JOURNEY_STATE_FORMAT,
   SAVE_FORMAT,
   SURVIVAL_SAVE_FORMAT,
   SURVIVAL_STATE_FORMAT,
@@ -14,7 +16,9 @@ import { assertSimulationState } from "./validation.js";
 
 export function serializeSave(state: Readonly<SimulationState>): string {
   assertSimulationState(state);
-  const envelope: SaveEnvelope = state.format === SURVIVAL_STATE_FORMAT
+  const envelope: SaveEnvelope = state.format === JOURNEY_STATE_FORMAT
+    ? { format: JOURNEY_SAVE_FORMAT, state }
+    : state.format === SURVIVAL_STATE_FORMAT
     ? { format: SURVIVAL_SAVE_FORMAT, state }
     : state.format === NAVIGATION_STATE_FORMAT
       ? { format: NAVIGATION_SAVE_FORMAT, state }
@@ -57,9 +61,10 @@ export function deserializeSave(data: string | Uint8Array): SimulationState {
     record["format"] !== SAVE_FORMAT
     && record["format"] !== NAVIGATION_SAVE_FORMAT
     && record["format"] !== SURVIVAL_SAVE_FORMAT
+    && record["format"] !== JOURNEY_SAVE_FORMAT
   ) {
     throw new SaveFormatError(
-      `save format must be ${SAVE_FORMAT}, ${NAVIGATION_SAVE_FORMAT}, or ${SURVIVAL_SAVE_FORMAT}`,
+      `save format must be ${SAVE_FORMAT}, ${NAVIGATION_SAVE_FORMAT}, ${SURVIVAL_SAVE_FORMAT}, or ${JOURNEY_SAVE_FORMAT}`,
     );
   }
   try {
@@ -70,9 +75,13 @@ export function deserializeSave(data: string | Uint8Array): SimulationState {
     );
   }
   const state = record["state"];
-  const envelopeMatches = (record["format"] === SAVE_FORMAT && state.format !== NAVIGATION_STATE_FORMAT && state.format !== SURVIVAL_STATE_FORMAT)
+  const envelopeMatches = (record["format"] === SAVE_FORMAT
+      && state.format !== NAVIGATION_STATE_FORMAT
+      && state.format !== SURVIVAL_STATE_FORMAT
+      && state.format !== JOURNEY_STATE_FORMAT)
     || (record["format"] === NAVIGATION_SAVE_FORMAT && state.format === NAVIGATION_STATE_FORMAT)
-    || (record["format"] === SURVIVAL_SAVE_FORMAT && state.format === SURVIVAL_STATE_FORMAT);
+    || (record["format"] === SURVIVAL_SAVE_FORMAT && state.format === SURVIVAL_STATE_FORMAT)
+    || (record["format"] === JOURNEY_SAVE_FORMAT && state.format === JOURNEY_STATE_FORMAT);
   if (!envelopeMatches) {
     throw new SaveFormatError("save envelope version does not match its state version");
   }
