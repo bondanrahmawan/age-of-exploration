@@ -1,103 +1,328 @@
+import { useEffect, useRef, useState } from "preact/hooks";
+import type { RefObject } from "preact";
 import type { ChartLandmarkViewModel, ChartPointViewModel, ChartViewModel } from "../view-model.js";
+
+interface PlotBox {
+  readonly width: number;
+  readonly height: number;
+}
 
 interface PlotTransform {
   readonly x: (value: number) => number;
   readonly y: (value: number) => number;
   readonly xScale: number;
   readonly yScale: number;
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+  readonly chrome: ReturnType<typeof chromeFor>;
 }
 
-function transformFor(points: readonly ChartPointViewModel[], landmarks: readonly ChartLandmarkViewModel[]): PlotTransform {
-  const xs = [...points.map((point) => point.xNm), ...landmarks.map((item) => item.xNm), -250, 250];
-  const ys = [...points.map((point) => point.yNm), ...landmarks.map((item) => item.yNm), -250, 250];
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const rangeX = Math.max(500, maxX - minX);
-  const rangeY = Math.max(500, maxY - minY);
+const FALLBACK_BOX: PlotBox = { width: 800, height: 500 };
+const NICE_STEPS_NM = [25, 50, 100, 200, 250, 500, 1_000, 2_000, 2_500, 5_000] as const;
+
+/** Chart furniture is sized from the pane, so a short cockpit panel never crowds out the sea. */
+function chromeFor(box: PlotBox) {
+  const tight = box.height < 340 || box.width < 620;
   return {
-    x: (value) => 70 + ((value - minX) / rangeX) * 660,
-    y: (value) => 440 - ((value - minY) / rangeY) * 380,
-    xScale: 660 / rangeX,
-    yScale: 380 / rangeY,
+    frame: tight ? 8 : 22,
+    left: tight ? 34 : 62,
+    right: tight ? 12 : 30,
+    top: tight ? 12 : 30,
+    bottom: tight ? 30 : 54,
+    ticksX: tight ? 4 : 9,
+    ticksY: tight ? 3 : 6,
+    tight,
   };
+}
+
+/** Presentation-only measurement: the chart claims its whole pane instead of letterboxing a fixed box. */
+function usePlotBox(ref: RefObject<HTMLDivElement>): PlotBox {
+  const [box, setBox] = useState<PlotBox>(FALLBACK_BOX);
+  useEffect(() => {
+    const node = ref.current;
+    if (node === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const measured = entries[0]?.contentRect;
+      if (measured === undefined || measured.width < 40 || measured.height < 40) return;
+      setBox({ width: Math.round(measured.width), height: Math.round(measured.height) });
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [ref]);
+  return box;
+}
+
+/**
+ * One nautical mile is the same length on both axes, so the grid reads as square sea and a single
+ * scale bar is true in every direction. The window is centred on the content and then widened on
+ * whichever axis has slack, rather than stretched to fill the pane.
+ */
+function transformFor(
+  points: readonly ChartPointViewModel[],
+  extraNm: number,
+  box: PlotBox,
+): PlotTransform {
+  const xs = points.map((point) => point.xNm);
+  const ys = points.map((point) => point.yNm);
+  const centreX = xs.length === 0 ? 0 : (Math.min(...xs) + Math.max(...xs)) / 2;
+  const centreY = ys.length === 0 ? 0 : (Math.min(...ys) + Math.max(...ys)) / 2;
+  const spreadX = xs.length === 0 ? 0 : (Math.max(...xs) - Math.min(...xs)) / 2;
+  const spreadY = ys.length === 0 ? 0 : (Math.max(...ys) - Math.min(...ys)) / 2;
+  const chrome = chromeFor(box);
+  const left = chrome.frame + chrome.left;
+  const right = box.width - chrome.frame - chrome.right;
+  const top = chrome.frame + chrome.top;
+  const bottom = box.height - chrome.frame - chrome.bottom;
+  const spanX = Math.max(60, right - left);
+  const spanY = Math.max(60, bottom - top);
+  const neededX = Math.max(100, spreadX + extraNm);
+  const neededY = Math.max(100, spreadY + extraNm);
+  const scale = Math.min(spanX / (neededX * 2), spanY / (neededY * 2));
+  const halfX = spanX / 2 / scale;
+  const halfY = spanY / 2 / scale;
+  const minX = centreX - halfX;
+  const minY = centreY - halfY;
+  return {
+    x: (value) => left + (value - minX) * scale,
+    y: (value) => bottom - (value - minY) * scale,
+    xScale: scale,
+    yScale: scale,
+    minX,
+    maxX: centreX + halfX,
+    minY,
+    maxY: centreY + halfY,
+    left,
+    right,
+    top,
+    bottom,
+    chrome,
+  };
+}
+
+/** Grid intervals are chosen so every ruled line stands for a round number of nautical miles. */
+function gradations(from: number, to: number, targetLines: number): readonly number[] {
+  const span = to - from;
+  const step = NICE_STEPS_NM.find((candidate) => span / candidate <= targetLines) ?? NICE_STEPS_NM.at(-1)!;
+  const first = Math.ceil(from / step) * step;
+  const marks: number[] = [];
+  for (let value = first; value <= to; value += step) marks.push(Math.round(value));
+  return marks;
+}
+
+interface PlacedLandmark {
+  readonly landmark: ChartLandmarkViewModel;
+  readonly x: number;
+  readonly y: number;
+  readonly labelY: number;
+  readonly offChart: boolean;
+  readonly distanceNm: number;
+  readonly bearing: string;
+}
+
+/**
+ * A working chart is drawn around the ship, not around the whole ocean. Landmarks outside the
+ * window are pinned to the edge with their distance so a rumoured goal 4,000 nm away cannot
+ * squash the water the player is actually sailing in.
+ */
+function placeLandmarks(
+  landmarks: readonly ChartLandmarkViewModel[],
+  transform: PlotTransform,
+  from: ChartPointViewModel,
+): readonly PlacedLandmark[] {
+  const taken: { x: number; y: number }[] = [];
+  const reach = (transform.right - transform.left) * (transform.chrome.tight ? 1 : 0.35);
+  return landmarks.map((landmark) => {
+    const insideX = landmark.xNm >= transform.minX && landmark.xNm <= transform.maxX;
+    const insideY = landmark.yNm >= transform.minY && landmark.yNm <= transform.maxY;
+    const eastWest = landmark.xNm - from.xNm;
+    const northSouth = landmark.yNm - from.yNm;
+    const distanceNm = Math.round(Math.hypot(eastWest, northSouth));
+    const vertical = northSouth >= 0 ? "N" : "S";
+    const horizontal = eastWest >= 0 ? "E" : "W";
+    const bearing = Math.abs(northSouth) >= Math.abs(eastWest) * 2
+      ? vertical
+      : Math.abs(eastWest) >= Math.abs(northSouth) * 2 ? horizontal : `${vertical}${horizontal}`;
+    const x = transform.x(Math.min(transform.maxX, Math.max(transform.minX, landmark.xNm)));
+    const y = transform.y(Math.min(transform.maxY, Math.max(transform.minY, landmark.yNm)));
+    let labelY = y + 5;
+    while (taken.some((mark) => Math.abs(mark.x - x) < reach && Math.abs(mark.y - labelY) < 15)) labelY += 16;
+    taken.push({ x, y: labelY });
+    return { landmark, x, y, labelY, offChart: !insideX || !insideY, distanceNm, bearing };
+  });
+}
+
+function scaleBarNm(transform: PlotTransform): number {
+  const usable = (transform.right - transform.left) * 0.24;
+  return NICE_STEPS_NM.find((candidate) => candidate * transform.xScale >= usable) ?? NICE_STEPS_NM.at(-1)!;
 }
 
 function pointsAttribute(points: readonly ChartPointViewModel[], transform: PlotTransform): string {
   return points.map((point) => `${transform.x(point.xNm).toFixed(1)},${transform.y(point.yNm).toFixed(1)}`).join(" ");
 }
 
+function ChartFrame({ transform, box }: { readonly transform: PlotTransform; readonly box: PlotBox }) {
+  const { chrome } = transform;
+  const eastWest = gradations(transform.minX, transform.maxX, chrome.ticksX);
+  const northSouth = gradations(transform.minY, transform.maxY, chrome.ticksY);
+  const bar = scaleBarNm(transform);
+  const barWidth = bar * transform.xScale;
+  const barX = transform.left;
+  const barY = transform.bottom + (chrome.tight ? 24 : 40);
+  const tickY = transform.bottom + (chrome.tight ? 13 : 18);
+  return (
+    <>
+      <rect
+        x={chrome.frame}
+        y={chrome.frame}
+        width={Math.max(40, box.width - chrome.frame * 2)}
+        height={Math.max(40, box.height - chrome.frame * 2)}
+        rx={chrome.tight ? 6 : 10}
+        class="chart-water"
+      />
+      {eastWest.map((value) => (
+        <g key={`gx-${value}`}>
+          <line x1={transform.x(value)} y1={transform.top} x2={transform.x(value)} y2={transform.bottom} class="chart-grid" />
+          <text x={transform.x(value)} y={tickY} text-anchor="middle" class="chart-tick">{value}</text>
+        </g>
+      ))}
+      {northSouth.map((value) => (
+        <g key={`gy-${value}`}>
+          <line x1={transform.left} y1={transform.y(value)} x2={transform.right} y2={transform.y(value)} class="chart-grid" />
+          <text x={transform.left - 7} y={transform.y(value) + 4} text-anchor="end" class="chart-tick">{value}</text>
+        </g>
+      ))}
+      {!chrome.tight && <text x={transform.left - 10} y={transform.top - 11} text-anchor="end" class="chart-axis">nm N/S</text>}
+      {!chrome.tight && <text x={transform.right} y={transform.bottom + 44} text-anchor="end" class="chart-axis">Same scale on both axes</text>}
+      {!chrome.tight && (
+        <g class="compass" aria-hidden="true">
+          <line x1={transform.right - 16} y1={transform.top + 34} x2={transform.right - 16} y2={transform.top - 2} class="compass-needle" />
+          <path d={`M${transform.right - 16},${transform.top - 10} l6,14 l-12,0 z`} class="compass-head" />
+          <text x={transform.right - 16} y={transform.top + 48} text-anchor="middle" class="chart-axis">N</text>
+        </g>
+      )}
+      <g class="scale-bar" aria-hidden="true">
+        <line x1={barX} y1={barY} x2={barX + barWidth} y2={barY} class="scale-rule" />
+        <line x1={barX} y1={barY - 5} x2={barX} y2={barY + 5} class="scale-rule" />
+        <line x1={barX + barWidth} y1={barY - 5} x2={barX + barWidth} y2={barY + 5} class="scale-rule" />
+          <text x={barX + barWidth + 8} y={barY + 4} class="chart-axis">{bar} {chrome.tight ? "nm" : "nautical miles"}</text>
+      </g>
+    </>
+  );
+}
+
 export function ActiveChart({ chart }: { readonly chart: ChartViewModel }) {
-  const transform = transformFor(chart.estimatedTrack, chart.knownLandmarks);
+  const pane = useRef<HTMLDivElement>(null);
+  const box = usePlotBox(pane);
+  const working = Math.max(chart.uncertaintyEastWestNm, chart.uncertaintyNorthSouthNm) * 1.9;
+  const transform = transformFor(
+    [...chart.estimatedTrack, chart.estimatedPosition],
+    Math.max(130, working),
+    box,
+  );
+  const placed = placeLandmarks(chart.knownLandmarks, transform, chart.estimatedPosition);
   const estimateX = transform.x(chart.estimatedPosition.xNm);
   const estimateY = transform.y(chart.estimatedPosition.yNm);
+  const origin = chart.estimatedTrack[0];
   return (
-    <section class="chart-shell" aria-labelledby="chart-title">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Chart room</p>
-          <h2 id="chart-title">Estimated Atlantic position</h2>
-        </div>
+    <section class="chart-shell" aria-label="Chart room: estimated Atlantic position">
+      <div class="chart-pane" ref={pane}>
         <p class="uncertainty-readout">
-          Uncertainty ellipse: ±{chart.uncertaintyEastWestNm.toFixed(1)} nm east–west,
-          ±{chart.uncertaintyNorthSouthNm.toFixed(1)} nm north–south
+          <span>Position is estimated</span>
+          Uncertainty ±{chart.uncertaintyEastWestNm.toFixed(0)} nm east–west,
+          ±{chart.uncertaintyNorthSouthNm.toFixed(0)} nm north–south
         </p>
-      </div>
-      <svg class="chart" viewBox="0 0 800 500" role="img" aria-labelledby="active-chart-svg-title active-chart-svg-desc">
-        <title id="active-chart-svg-title">Accessible estimated-position chart</title>
-        <desc id="active-chart-svg-desc">
-          The dotted track is the crew's estimate. The hatched ellipse is uncertainty, not a coastline.
-          Known chart symbols have visible labels and can receive keyboard focus.
-        </desc>
-        <defs>
-          <pattern id="uncertainty-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-            <line x1="0" y1="0" x2="0" y2="10" class="hatch-line" />
-          </pattern>
-          <marker id="heading-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L7,3 z" class="heading-arrow" />
-          </marker>
-        </defs>
-        <rect x="40" y="30" width="720" height="430" rx="18" class="chart-water" />
-        {[100, 200, 300, 400, 500, 600, 700].map((x) => <line key={`gx-${x}`} x1={x} y1="45" x2={x} y2="445" class="chart-grid" />)}
-        {[100, 180, 260, 340, 420].map((y) => <line key={`gy-${y}`} x1="55" y1={y} x2="745" y2={y} class="chart-grid" />)}
-        <polyline points={pointsAttribute(chart.estimatedTrack, transform)} class="estimated-track" aria-label="Estimated track history" />
-        <ellipse
-          cx={estimateX}
-          cy={estimateY}
-          rx={Math.max(5, chart.uncertaintyEastWestNm * transform.xScale)}
-          ry={Math.max(5, chart.uncertaintyNorthSouthNm * transform.yScale)}
-          class="uncertainty-ellipse"
-          aria-label={`Uncertainty ellipse, plus or minus ${chart.uncertaintyEastWestNm.toFixed(1)} nautical miles east west and ${chart.uncertaintyNorthSouthNm.toFixed(1)} nautical miles north south`}
-        />
-        <line x1={estimateX} y1={estimateY} x2={estimateX + 54} y2={estimateY - 28} class="heading-line" marker-end="url(#heading-arrow)" />
-        <g tabIndex={0} role="img" aria-label={`Estimated position, heading ${chart.heading}`}>
-          <circle cx={estimateX} cy={estimateY} r="8" class="estimated-position" />
-          <text x={estimateX + 12} y={estimateY - 10} class="chart-label">Estimate · {chart.heading}</text>
-        </g>
-        {chart.knownLandmarks.map((landmark) => {
-          const x = transform.x(landmark.xNm);
-          const y = transform.y(landmark.yNm);
-          const alignLeft = x > 590;
-          return (
-            <g
-              key={landmark.id}
-              tabIndex={0}
-              role="img"
-              aria-label={`${landmark.label}, ${landmark.status}, confidence ${landmark.confidence} percent`}
-            >
-              <rect x={x - 7} y={y - 7} width="14" height="14" class="landmark-symbol" />
-              <text x={x + (alignLeft ? -12 : 12)} y={y + 4} text-anchor={alignLeft ? "end" : "start"} class="chart-label">
-                {landmark.label} · {landmark.confidence}%
-              </text>
+        <svg
+          class="chart"
+          viewBox={`0 0 ${box.width} ${box.height}`}
+          preserveAspectRatio="none"
+          role="img"
+          aria-labelledby="active-chart-svg-title active-chart-svg-desc"
+        >
+          <title id="active-chart-svg-title">Accessible estimated-position chart</title>
+          <desc id="active-chart-svg-desc">
+            The marker is the crew's estimate of where the ship is, not its true position. The dotted line is the
+            estimated track and the hatched ellipse is the uncertainty around the estimate, not a coastline.
+            Grid lines are ruled in nautical miles east–west and north–south. Known chart symbols have visible
+            labels and can receive keyboard focus.
+          </desc>
+          <defs>
+            <pattern id="uncertainty-hatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="9" class="hatch-line" />
+            </pattern>
+            <marker id="heading-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L7,3 z" class="heading-arrow" />
+            </marker>
+          </defs>
+          <ChartFrame transform={transform} box={box} />
+          <ellipse
+            cx={estimateX}
+            cy={estimateY}
+            rx={Math.max(7, chart.uncertaintyEastWestNm * transform.xScale)}
+            ry={Math.max(7, chart.uncertaintyNorthSouthNm * transform.yScale)}
+            class="uncertainty-ellipse"
+            aria-label={`Uncertainty ellipse, plus or minus ${chart.uncertaintyEastWestNm.toFixed(1)} nautical miles east west and ${chart.uncertaintyNorthSouthNm.toFixed(1)} nautical miles north south`}
+          />
+          {origin !== undefined && (
+            <g aria-hidden="true">
+              <circle cx={transform.x(origin.xNm)} cy={transform.y(origin.yNm)} r="4.5" class="track-origin" />
             </g>
-          );
-        })}
-      </svg>
+          )}
+          <polyline points={pointsAttribute(chart.estimatedTrack, transform)} class="estimated-track" aria-label="Estimated track history" />
+          {placed.map(({ landmark, x, y, labelY, offChart, distanceNm, bearing }) => {
+            const alignLeft = x > transform.right - 210;
+            const crowded = Math.abs(x - estimateX) < 210 && Math.abs(labelY - estimateY) < 22;
+            const caption = offChart
+              ? `${landmark.label} · ${distanceNm} nm ${bearing} · ${landmark.confidence}%`
+              : `${landmark.label} · ${landmark.confidence}%`;
+            return (
+              <g
+                key={landmark.id}
+                tabIndex={0}
+                role="img"
+                aria-label={
+                  offChart
+                    ? `${landmark.label}, off the current chart window, about ${distanceNm} nautical miles ${bearing} of the estimate, ${landmark.status}, confidence ${landmark.confidence} percent`
+                    : `${landmark.label}, ${landmark.status}, confidence ${landmark.confidence} percent`
+                }
+              >
+                <rect
+                  x={x - 6}
+                  y={y - 6}
+                  width="12"
+                  height="12"
+                  transform={`rotate(45 ${x} ${y})`}
+                  class={offChart ? "landmark-symbol landmark-off-chart" : "landmark-symbol"}
+                />
+                <text
+                  x={x + (alignLeft ? -14 : 14)}
+                  y={crowded ? Math.max(labelY, y + 22) : labelY}
+                  text-anchor={alignLeft ? "end" : "start"}
+                  class={offChart ? "chart-label chart-label-off" : "chart-label"}
+                >
+                  {caption}
+                </text>
+              </g>
+            );
+          })}
+          <line x1={estimateX} y1={estimateY} x2={estimateX + 46} y2={estimateY - 26} class="heading-line" marker-end="url(#heading-arrow)" />
+          <g tabIndex={0} role="img" aria-label={`Estimated position, heading ${chart.heading}`}>
+            <circle cx={estimateX} cy={estimateY} r="9" class="estimated-position" />
+            <text x={estimateX + 52} y={estimateY - 30} class="chart-label chart-label-estimate">Estimate · {chart.heading}</text>
+          </g>
+        </svg>
+      </div>
       <div class="chart-legend" aria-label="Chart legend">
-        <span><i class="legend-line estimated" /> Estimated track</span>
-        <span><i class="legend-area" /> Hatched uncertainty</span>
-        <span><i class="legend-square" /> Known landmark with confidence label</span>
+        <span><i class="legend-origin" /> Departure point</span>
+        <span><i class="legend-line estimated" /> Estimated track<span class="legend-detail"> — where the crew believes it sailed</span></span>
+        <span><i class="legend-area" /> Hatched uncertainty — how wrong the estimate may be, not a coastline</span>
+        <span><i class="legend-square" /> Known landmark<span class="legend-detail"> with confidence label</span></span>
+        <span><i class="legend-square off" /> Beyond this window<span class="legend-detail"> — pinned to the edge with its distance</span></span>
       </div>
       <dl class="chart-notes">
         <div><dt>Estimated coordinates</dt><dd>{chart.estimatedPosition.xNm.toFixed(1)} nm E/W, {chart.estimatedPosition.yNm.toFixed(1)} nm N/S</dd></div>
@@ -118,7 +343,9 @@ export function AfterActionChart({ estimated, actual }: {
   readonly estimated: readonly ChartPointViewModel[];
   readonly actual: readonly ChartPointViewModel[];
 }) {
-  const transform = transformFor([...estimated, ...actual], []);
+  const pane = useRef<HTMLDivElement>(null);
+  const box = usePlotBox(pane);
+  const transform = transformFor([...estimated, ...actual], 90, box);
   return (
     <section class="chart-shell report-chart" aria-labelledby="report-chart-title">
       <div class="section-heading">
@@ -127,16 +354,24 @@ export function AfterActionChart({ estimated, actual }: {
           <h2 id="report-chart-title">Estimated and actual tracks</h2>
         </div>
       </div>
-      <svg class="chart" viewBox="0 0 800 500" role="img" aria-labelledby="report-svg-title report-svg-desc">
-        <title id="report-svg-title">Finalized estimated and actual route comparison</title>
-        <desc id="report-svg-desc">The dotted line is the estimated route. The solid double-marked line is the actual route, revealed only in this finalized report.</desc>
-        <rect x="40" y="30" width="720" height="430" rx="18" class="chart-water" />
-        <polyline points={pointsAttribute(estimated, transform)} class="estimated-track" />
-        <polyline points={pointsAttribute(actual, transform)} class="actual-track" />
-        {actual.filter((_, index) => index % Math.max(1, Math.floor(actual.length / 12)) === 0).map((point) => (
-          <circle key={`${point.day}-${point.xNm}-${point.yNm}`} cx={transform.x(point.xNm)} cy={transform.y(point.yNm)} r="4" class="actual-marker" />
-        ))}
-      </svg>
+      <div class="chart-pane" ref={pane}>
+        <svg
+          class="chart"
+          viewBox={`0 0 ${box.width} ${box.height}`}
+          preserveAspectRatio="none"
+          role="img"
+          aria-labelledby="report-svg-title report-svg-desc"
+        >
+          <title id="report-svg-title">Finalized estimated and actual route comparison</title>
+          <desc id="report-svg-desc">The dotted line is the estimated route. The solid double-marked line is the actual route, revealed only in this finalized report. Grid lines are ruled in nautical miles.</desc>
+          <ChartFrame transform={transform} box={box} />
+          <polyline points={pointsAttribute(estimated, transform)} class="estimated-track" />
+          <polyline points={pointsAttribute(actual, transform)} class="actual-track" />
+          {actual.filter((_, index) => index % Math.max(1, Math.floor(actual.length / 12)) === 0).map((point) => (
+            <circle key={`${point.day}-${point.xNm}-${point.yNm}`} cx={transform.x(point.xNm)} cy={transform.y(point.yNm)} r="4" class="actual-marker" />
+          ))}
+        </svg>
+      </div>
       <div class="chart-legend" aria-label="Finalized chart legend">
         <span><i class="legend-line estimated" /> Estimated track, dotted</span>
         <span><i class="legend-line actual" /> Actual track, solid with round markers</span>

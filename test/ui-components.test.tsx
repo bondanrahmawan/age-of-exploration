@@ -28,6 +28,9 @@ describe("WP5 accessible product surfaces", () => {
     const { container } = render(<App controller={game} />);
     expect(container.querySelectorAll("[data-screen]")).toHaveLength(1);
     expect(container.querySelector("[data-screen='outfitting']")).not.toBeNull();
+    expect(container.textContent).not.toContain("Age of Exploration");
+    expect(container.textContent).not.toContain("The Uncertain Sea");
+    expect(container.textContent).not.toContain("Local only · deterministic commands · no telemetry or network play");
     fireEvent.click(screen.getByRole("button", { name: "Begin new local campaign" }));
     const water = screen.getByLabelText(/Water tonnes/);
     fireEvent.input(water, { target: { value: "25" } });
@@ -40,10 +43,14 @@ describe("WP5 accessible product surfaces", () => {
     game.beginNewCampaign();
     game.outfitAndDepart({ waterKg: 20_000, provisionsKg: 16_000, repairStoresKg: 4_000, medicineKg: 0 });
     const { container } = render(<App controller={game} />);
-    expect(screen.getByRole("heading", { name: "Estimated Atlantic position" })).toBeTruthy();
-    expect(screen.getByText(/Uncertainty ellipse:/)).toBeTruthy();
-    expect(screen.getByText("Estimated track")).toBeTruthy();
-    expect(screen.getByText("Hatched uncertainty")).toBeTruthy();
+    expect(screen.getByText(/Uncertainty ±\d+ nm east–west/)).toBeTruthy();
+    expect(screen.getByText(/where the crew believes it sailed/)).toBeTruthy();
+    expect(screen.getByText(/Hatched uncertainty/)).toBeTruthy();
+    expect(screen.getByText(/pinned to the edge with its distance/)).toBeTruthy();
+    expect(screen.getByText(/Position is estimated/i)).toBeTruthy();
+    expect(screen.getByText(/how wrong the estimate may be, not a coastline/i)).toBeTruthy();
+    expect(screen.getByText(/Recognise the Cape region/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Set orders, then sail" })).toBeTruthy();
     expect(container.querySelectorAll("svg [role='img']").length).toBeGreaterThan(0);
     const dom = container.innerHTML;
     for (const forbidden of ["truePosition", "hiddenTrace", "eventPrng", "environmentPrng", "unknown current vector", "event weights"]) {
@@ -80,6 +87,10 @@ describe("WP5 accessible product surfaces", () => {
         kind: "event",
         title: event.title,
         description: event.logText,
+        date: "1488-04-02",
+        elapsedDays: 1,
+        mission: { milestone: "Reach or use Cape Verde", status: "Cape recognition is still required." },
+        lastResult: null,
         choices,
         location: "at_sea",
         stores: { waterKg: 1_000, provisionsKg: 1_000, repairStoresKg: 1_000, medicineKg: 1_000 },
@@ -104,7 +115,7 @@ describe("WP5 accessible product surfaces", () => {
         survivalStatus: "active",
         eventId: event.id,
       } satisfies InterruptViewModel;
-      render(<InterruptScreen model={model} controller={fake} />);
+      render(<InterruptScreen model={model} autosaveBoundary="Pending event decision" controller={fake} />);
       expect(screen.getAllByRole("button")).toHaveLength(event.choices.length);
       expect(screen.getByText(/Focused disabled-reason proof/)).toBeTruthy();
       expect((screen.getByRole("button", { name: event.choices[0]!.label }) as HTMLButtonElement).disabled).toBe(true);
@@ -117,6 +128,7 @@ describe("WP5 accessible product surfaces", () => {
     } as unknown as GameActions;
     const base: InterruptViewModel = {
       kind: "cape_verde", title: "Cape Verde", description: "Port", choices: [], location: "cape_verde",
+      date: "1488-04-02", elapsedDays: 1, mission: { milestone: "Use Cape Verde and choose the next leg", status: "Cape recognition is still required." }, lastResult: null,
       stores: { waterKg: 1_000, provisionsKg: 1_000, repairStoresKg: 1_000, medicineKg: 0 },
       stock: { waterKg: 24_000, provisionsKg: 12_000, repairStoresKg: 4_000, medicineKg: 500 }, moneyDucats: 100,
       ship: { hullBps: 9_000, mastBps: 9_000, sailsBps: 9_000, rudderBps: 9_000 }, crew: { count: 25, able: 25, healthBps: 9_000, moraleBps: 7_500 },
@@ -124,11 +136,11 @@ describe("WP5 accessible product surfaces", () => {
       capeSurveyDaysCompleted: 0, capeSurveyed: false, capeWaterKnown: false, holdRemainingKg: 40_000,
       outcomeReason: null, statusMessage: null, warnings: [], canRecogniseCape: false, canEnterCapeVerde: false, canDismiss: false, survivalStatus: "active", eventId: null,
     };
-    const view = render(<InterruptScreen model={base} controller={fake} />);
+    const view = render(<InterruptScreen model={base} autosaveBoundary="Day 1 boundary" controller={fake} />);
     for (const name of [/Buy Water/, /Buy Provisions/, /Buy Repair stores/, /Buy Medicine/, /Rest ashore/, /Careen one day/, /Buy a seeded rumour/, /Deposit report snapshot/, /Turn home/, /Depart Cape Verde/]) {
       expect(screen.getByRole("button", { name })).toBeTruthy();
     }
-    view.rerender(<InterruptScreen model={{ ...base, kind: "cape", title: "Cape", location: "cape", stock: null, capeWaterKnown: true }} controller={fake} />);
+    view.rerender(<InterruptScreen model={{ ...base, kind: "cape", title: "Cape", location: "cape", stock: null, capeWaterKnown: true }} autosaveBoundary="Day 2 boundary" controller={fake} />);
     for (const name of [/Survey one full day/, /Collect legal Cape water/, /Turn home/, /Leave the Cape/]) expect(screen.getByRole("button", { name })).toBeTruthy();
   });
 

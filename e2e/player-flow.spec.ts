@@ -1,5 +1,54 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const FIXED_SESSION_VIEWPORTS = [
+  { width: 1280, height: 720 },
+  { width: 1366, height: 768 },
+  { width: 1920, height: 1080 },
+  { width: 520, height: 900 },
+] as const;
+
+async function assertFixedSessionLayout(page: Page): Promise<void> {
+  for (const viewport of FIXED_SESSION_VIEWPORTS) {
+    await page.setViewportSize(viewport);
+    const layout = await page.evaluate(() => {
+      const root = document.documentElement;
+      const main = document.querySelector("main");
+      const mainRect = main?.getBoundingClientRect();
+      const inViewport = (selector: string) => {
+        const element = document.querySelector(selector);
+        if (element === null) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.top >= -1 && rect.left >= -1 && rect.bottom <= innerHeight + 1 && rect.right <= innerWidth + 1;
+      };
+      return {
+        verticalOverflow: root.scrollHeight - root.clientHeight,
+        horizontalOverflow: root.scrollWidth - root.clientWidth,
+        missionVisible: inViewport(".mission-summary"),
+        milestoneVisible: inViewport(".milestone-summary"),
+        criticalVisible: inViewport(".critical-status"),
+        decisionVisible: inViewport(".order-heading, .interrupt-decision-frame h2"),
+        primaryVisible: inViewport(".primary-action"),
+        removedChromeCount: document.querySelectorAll(".app-chrome, .site-footer").length,
+        mainTopGap: mainRect?.top ?? Number.POSITIVE_INFINITY,
+        mainBottomGap: mainRect === undefined ? Number.POSITIVE_INFINITY : innerHeight - mainRect.bottom,
+      };
+    });
+    expect(Math.abs(layout.verticalOverflow), `${viewport.width}x${viewport.height} vertical document overflow`).toBeLessThanOrEqual(1);
+    expect(Math.abs(layout.horizontalOverflow), `${viewport.width}x${viewport.height} horizontal document overflow`).toBeLessThanOrEqual(1);
+    expect(layout.missionVisible).toBe(true);
+    expect(layout.milestoneVisible).toBe(true);
+    expect(layout.criticalVisible).toBe(true);
+    expect(layout.decisionVisible).toBe(true);
+    expect(layout.primaryVisible).toBe(true);
+    expect(layout.removedChromeCount).toBe(0);
+    expect(Math.abs(layout.mainTopGap), `${viewport.width}x${viewport.height} empty global header space`).toBeLessThanOrEqual(1);
+    expect(Math.abs(layout.mainBottomGap), `${viewport.width}x${viewport.height} empty global footer space`).toBeLessThanOrEqual(1);
+  }
+  await expect(page.getByText("Age of Exploration", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("The Uncertain Sea", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Local only · deterministic commands · no telemetry or network play", { exact: true })).toHaveCount(0);
+}
+
 async function assertActiveTruthBoundary(page: Page): Promise<void> {
   const markup = await page.locator("#app").innerHTML();
   for (const forbidden of ["truePosition", "hiddenTrace", "eventPrng", "environmentPrng", "snapshotHash", "runSeed"]) {
@@ -87,12 +136,46 @@ test("chart, log, skipped pacing, keyboard controls, and narrow layout remain us
   await outfitAndDepart(page);
   await expect(page.getByRole("img", { name: /Accessible estimated-position chart/ })).toBeVisible();
   await expect(page.locator("svg [role='img'][tabindex='0']").first()).toBeVisible();
+  await expect(page.getByText(/Position is estimated/i)).toBeVisible();
+  await expect(page.getByText(/how wrong the estimate may be, not a coastline/i)).toBeVisible();
   await page.getByLabel("Animation").selectOption("skipped");
+  await page.getByRole("tab", { name: "Deck" }).press("Enter");
+  await expect(page.getByRole("heading", { name: "Ship, crew, and stores" })).toBeVisible();
+  await page.getByRole("tab", { name: "Chart" }).press("Enter");
+  await page.getByRole("combobox", { name: "Heading" }).selectOption("W");
+  for (let day = 0; day < 12; day += 1) await page.getByRole("button", { name: /Advance one day/ }).press("Enter");
+  await page.setViewportSize({ width: 520, height: 900 });
   await page.getByRole("tab", { name: "Log" }).press("Enter");
   await expect(page.getByRole("heading", { name: "Expedition log" })).toBeVisible();
+  const log = page.locator(".log-panel");
+  const logOverflow = await log.evaluate((element) => element.scrollHeight - element.clientHeight);
+  expect(logOverflow).toBeGreaterThan(0);
+  await log.press("PageDown");
+  await expect.poll(() => log.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   await page.getByRole("tab", { name: "Chart" }).press("Enter");
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
+  await assertActiveTruthBoundary(page);
+});
+
+test("fixed expedition and interrupt workspaces hold required information at every target viewport", async ({ page }) => {
+  await page.getByRole("button", { name: "Begin new local campaign" }).press("Enter");
+  await outfitAndDepart(page);
+  await assertFixedSessionLayout(page);
+
+  await page.getByRole("combobox", { name: "Heading" }).selectOption("SW");
+  await page.getByRole("button", { name: /Advance one day/ }).press("Enter");
+  await expect(page.getByRole("heading", { name: "Use the known port" })).toBeVisible();
+  await assertFixedSessionLayout(page);
+  await page.getByRole("button", { name: /Enter Cape Verde port/ }).press("Enter");
+  await assertFixedSessionLayout(page);
+
+  const portOperations = page.getByLabel("Cape Verde stores and services");
+  const portOverflow = await portOperations.evaluate((element) => element.scrollHeight - element.clientHeight);
+  expect(portOverflow).toBeGreaterThan(0);
+  await portOperations.press("PageDown");
+  await expect.poll(() => portOperations.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect(page.getByRole("button", { name: /Depart Cape Verde/ })).toBeInViewport();
   await assertActiveTruthBoundary(page);
 });
 

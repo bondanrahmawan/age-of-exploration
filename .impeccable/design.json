@@ -1,0 +1,326 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-25T00:00:00.000Z",
+  "title": "Design System: Age of Exploration",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "neutral",
+        "displayName": "Chart Ink",
+        "canonical": "#163532",
+        "tonalRamp": ["#0a1a18", "#102725", "#163532", "#224c47", "#35706a", "#5d9a94", "#9cc4bf", "#d5e7e4"]
+      },
+      "ink-muted": {
+        "role": "neutral",
+        "displayName": "Faded Ink",
+        "canonical": "#62716b",
+        "tonalRamp": ["#1c211f", "#2f3735", "#454f4c", "#62716b", "#7f8d88", "#a3aeaa", "#c8cfcc", "#e8ecea"]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Working Paper",
+        "canonical": "#f8f4e8",
+        "tonalRamp": ["#2b281f", "#463f30", "#665c47", "#8d8168", "#b5a891", "#d6cbb6", "#eee6d2", "#f8f4e8"]
+      },
+      "paper-deep": {
+        "role": "neutral",
+        "displayName": "Weathered Paper",
+        "canonical": "#eee6d2",
+        "tonalRamp": ["#292418", "#443c28", "#63583b", "#877a57", "#ab9d78", "#cbbf9f", "#eee6d2", "#f7f2e6"]
+      },
+      "paper-inset": {
+        "role": "neutral",
+        "displayName": "Paper Highlight",
+        "canonical": "#fffdf7",
+        "tonalRamp": ["#2c2a20", "#484532", "#676248", "#8e8865", "#b6af88", "#d8d2b3", "#f0ecda", "#fffdf7"]
+      },
+      "desk": {
+        "role": "neutral",
+        "displayName": "Desk",
+        "canonical": "#e9e5d8",
+        "tonalRamp": ["#26241b", "#403c2c", "#5d573f", "#807956", "#a49c76", "#c5bd9d", "#e9e5d8", "#f4f1e8"]
+      },
+      "sea": {
+        "role": "primary",
+        "displayName": "Deep Sea",
+        "canonical": "#153f43",
+        "tonalRamp": ["#071c1e", "#0d2b2f", "#153f43", "#1e5a60", "#2b7a82", "#4ba3ab", "#8ac8cd", "#cbe6e8"]
+      },
+      "sea-deep": {
+        "role": "primary",
+        "displayName": "Sea Ink",
+        "canonical": "#0d2b2f",
+        "tonalRamp": ["#041214", "#0d2b2f", "#124046", "#18565e", "#217079", "#3d959e", "#7ec0c7", "#c4e2e5"]
+      },
+      "teal": {
+        "role": "primary",
+        "displayName": "Chart Teal",
+        "canonical": "#2f7875",
+        "tonalRamp": ["#0d2523", "#153b39", "#1f5351", "#2f7875", "#3f948f", "#66b2ad", "#9bcfcb", "#d2e9e7"]
+      },
+      "gold": {
+        "role": "secondary",
+        "displayName": "Brass Divider",
+        "canonical": "#b98b3d",
+        "tonalRamp": ["#2e2009", "#4a3512", "#6b4c1c", "#8f6828", "#b98b3d", "#d1a862", "#e3c795", "#f3e4c8"]
+      },
+      "gold-lamp": {
+        "role": "secondary",
+        "displayName": "Lamplight Gold",
+        "canonical": "#e9bd68",
+        "tonalRamp": ["#36280e", "#544019", "#775c24", "#9d7c32", "#c39f48", "#e9bd68", "#f2d69b", "#faecd0"]
+      },
+      "gold-marker": {
+        "role": "secondary",
+        "displayName": "Marker Gold",
+        "canonical": "#f3c66f",
+        "tonalRamp": ["#392a10", "#58431b", "#7c6127", "#a48236", "#cba54c", "#f3c66f", "#f8dda4", "#fdf0d6"]
+      },
+      "rust": {
+        "role": "tertiary",
+        "displayName": "Iron-Gall Rust",
+        "canonical": "#a64f35",
+        "tonalRamp": ["#2a1109", "#451c0f", "#652a17", "#86391f", "#a64f35", "#c47759", "#dda78f", "#f2d8cb"]
+      },
+      "focus-amber": {
+        "role": "tertiary",
+        "displayName": "Focus Amber",
+        "canonical": "#f0b94f",
+        "tonalRamp": ["#38260a", "#563b12", "#7a561c", "#a2732a", "#c9943a", "#f0b94f", "#f6d489", "#fbecc4"]
+      },
+      "chart-water": {
+        "role": "neutral",
+        "displayName": "Chart Water",
+        "canonical": "#d8e6df",
+        "tonalRamp": ["#1c2823", "#2f403a", "#455c53", "#5f7a70", "#82998f", "#a9bcb3", "#d8e6df", "#eef4f1"]
+      },
+      "chart-water-edge": {
+        "role": "neutral",
+        "displayName": "Water Edge",
+        "canonical": "#67857d",
+        "tonalRamp": ["#1a2422", "#2b3a36", "#3e534d", "#536e66", "#67857d", "#8ba69e", "#b4c8c2", "#dde7e4"]
+      },
+      "chart-grid": {
+        "role": "neutral",
+        "displayName": "Chart Grid",
+        "canonical": "#8ba69e",
+        "tonalRamp": ["#212c29", "#35443f", "#4b5f58", "#647c74", "#8ba69e", "#a9bfb9", "#c8d7d3", "#e6eeeb"]
+      },
+      "confidence-rumoured": {
+        "role": "tertiary",
+        "displayName": "Rumoured Ochre",
+        "canonical": "#7c6339",
+        "tonalRamp": ["#211a0f", "#362a18", "#4d3c22", "#65502e", "#7c6339", "#9d8256", "#c0ab88", "#e2d7c0"]
+      },
+      "confidence-observed": {
+        "role": "tertiary",
+        "displayName": "Observed Teal",
+        "canonical": "#286f6c",
+        "tonalRamp": ["#0a1f1e", "#12332f", "#1b4a47", "#286f6c", "#358c88", "#57ada9", "#8fcbc8", "#cbe7e5"]
+      },
+      "confidence-confirmed": {
+        "role": "tertiary",
+        "displayName": "Confirmed Green",
+        "canonical": "#245d42",
+        "tonalRamp": ["#081b12", "#0f2d1f", "#17422e", "#245d42", "#317b57", "#4f9d76", "#8bc0a5", "#c8e2d5"]
+      },
+      "confidence-disproved": {
+        "role": "tertiary",
+        "displayName": "Disproved Rust",
+        "canonical": "#8b3f30",
+        "tonalRamp": ["#241009", "#3b1a11", "#54251a", "#703224", "#8b3f30", "#ac6353", "#cb9585", "#e9ccc2"]
+      },
+      "warning-field": {
+        "role": "tertiary",
+        "displayName": "Warning Field",
+        "canonical": "#fff0e6",
+        "tonalRamp": ["#33201a", "#4e332a", "#6f4b3c", "#946853", "#b98d76", "#d6b3a0", "#eed7c9", "#fff0e6"]
+      },
+      "warning-ink": {
+        "role": "tertiary",
+        "displayName": "Warning Ink",
+        "canonical": "#6e2e22",
+        "tonalRamp": ["#1d0c08", "#301410", "#461e16", "#5c261c", "#6e2e22", "#94513f", "#bc8574", "#e2c4b8"]
+      },
+      "error-field": {
+        "role": "tertiary",
+        "displayName": "Error Field",
+        "canonical": "#fff2e8",
+        "tonalRamp": ["#33231b", "#4e372c", "#6f503f", "#946e56", "#b99379", "#d6b8a2", "#eedaca", "#fff2e8"]
+      },
+      "error-ink": {
+        "role": "tertiary",
+        "displayName": "Error Ink",
+        "canonical": "#792f20",
+        "tonalRamp": ["#200c07", "#35150e", "#4c1f15", "#63271b", "#792f20", "#9f533d", "#c58872", "#e7c6b7"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Ruled Edge",
+        "canonical": "rgba(22, 53, 50, 0.18)",
+        "tonalRamp": ["rgba(22,53,50,0.9)", "rgba(22,53,50,0.75)", "rgba(22,53,50,0.6)", "rgba(22,53,50,0.45)", "rgba(22,53,50,0.32)", "rgba(22,53,50,0.18)", "rgba(22,53,50,0.1)", "rgba(22,53,50,0.05)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Screen titles at document density; reduced in place to clamp(1.45rem, 2vw, 1.8rem) in the cockpit." },
+      "headline": { "displayName": "Headline", "purpose": "Panel titles — Chart room, Deck, Log, Current decision." },
+      "title": { "displayName": "Title", "purpose": "Sub-sections inside a panel." },
+      "readout": { "displayName": "Readout", "purpose": "Numbers the player decides against: stat tiles, store counts, the projected-range callout at 1.85rem." },
+      "body": { "displayName": "Body", "purpose": "Ledes and explanatory prose at document density, capped near 62ch." },
+      "dense": { "displayName": "Dense", "purpose": "Cockpit working text: chart guidance, choice descriptions, last-result, warnings. Drops to 0.68rem below 760px." },
+      "label": { "displayName": "Label", "purpose": "The uppercase eyebrow indexing every block; becomes Lamplight Gold at 0.65rem on dark sea surfaces." },
+      "field-label": { "displayName": "Field Label", "purpose": "Definition-list terms, table headers, stat captions." }
+    },
+    "shadows": [
+      { "name": "ambient-panel", "value": "0 24px 60px rgba(29,45,42,0.13)", "purpose": "Document-density panels, save cards, report sections." },
+      { "name": "cockpit-panel", "value": "0 10px 28px rgba(29,45,42,0.1)", "purpose": "Command rail, chart shell, decision surfaces — tighter so a dense screen does not turn to mush." },
+      { "name": "instrument-bar", "value": "0 7px 20px rgba(13,43,47,0.12)", "purpose": "The session briefing bar floating over the workspace." },
+      { "name": "port-surface", "value": "0 8px 22px rgba(29,45,42,0.09)", "purpose": "Cape Verde port primary-action surface." },
+      { "name": "button-hover", "value": "0 7px 18px rgba(22,53,50,0.12)", "purpose": "Paired with a 1px lift on hover; buttons carry no resting shadow." },
+      { "name": "tab-selected", "value": "inset 0 -3px #b98b3d", "purpose": "Gold underline marking the selected panel tab." },
+      { "name": "seal-ring", "value": "inset 0 0 0 6px #e9e5d8, inset 0 0 0 7px #b98b3d", "purpose": "The double ring inside the wax seal." },
+      { "name": "focus-ring", "value": "0 0 0 4px #f0b94f", "purpose": "Expressed as outline: 4px solid #f0b94f at 3px offset on every interactive element, chart symbols included." }
+    ],
+    "motion": [
+      { "name": "state-transition", "value": "transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease", "purpose": "The only transition in the system, applied to buttons. Nothing else animates." },
+      { "name": "hover-lift", "value": "translateY(-1px)", "purpose": "The tactile press affordance; paired with button-hover shadow." },
+      { "name": "reduced-motion", "value": "animation-duration: 0.01ms; transition-duration: 0.01ms; scroll-behavior: auto", "purpose": "Applied globally under prefers-reduced-motion: reduce. The controller also defaults its own animation setting to reduced when that query matches." }
+    ],
+    "breakpoints": [
+      { "name": "document-wide", "value": "1050px" },
+      { "name": "cockpit-reflow", "value": "760px" },
+      { "name": "document-stack", "value": "700px" },
+      { "name": "compact", "value": "430px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single action that advances the session. Carries a sub-label stating cost or consequence.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">Depart Cape Verde <small>Continue south or follow the return intent.</small></button>",
+      "css": ".ds-btn-primary { font: inherit; font-weight: 700; color: #fff; background: #153f43; border: 1px solid #153f43; border-radius: 6px; padding: 0.72rem 1rem; cursor: pointer; text-align: left; transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease; } .ds-btn-primary small { display: block; margin-top: 0.35rem; font-weight: 500; line-height: 1.35; } .ds-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 7px 18px rgba(22,53,50,0.12); } .ds-btn-primary:focus-visible { outline: 4px solid #f0b94f; outline-offset: 3px; } .ds-btn-primary:disabled { cursor: not-allowed; opacity: 0.58; transform: none; box-shadow: none; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Alternative action beside a primary. Outline only, never filled.",
+      "html": "<button class=\"ds-btn-secondary\" type=\"button\">Turn back for Lisbon</button>",
+      "css": ".ds-btn-secondary { font: inherit; font-weight: 700; color: #153f43; background: transparent; border: 1px solid #153f43; border-radius: 6px; padding: 0.72rem 1rem; cursor: pointer; transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease; } .ds-btn-secondary:hover { transform: translateY(-1px); box-shadow: 0 7px 18px rgba(22,53,50,0.12); background: #fff; } .ds-btn-secondary:focus-visible { outline: 4px solid #f0b94f; outline-offset: 3px; }"
+    },
+    {
+      "name": "Panel Tabs",
+      "kind": "nav",
+      "refersTo": "tab-selected",
+      "description": "Chart / Deck / Log switcher. Selection is a gold inset underline driven by aria-selected.",
+      "html": "<nav class=\"ds-tabs\" role=\"tablist\" aria-label=\"Expedition views\"><button role=\"tab\" type=\"button\" aria-selected=\"true\">Chart</button><button role=\"tab\" type=\"button\" aria-selected=\"false\">Deck</button><button role=\"tab\" type=\"button\" aria-selected=\"false\">Log</button></nav>",
+      "css": ".ds-tabs { display: flex; gap: 0.3rem; padding: 0 0.3rem; border-bottom: 1px solid rgba(22,53,50,0.18); } .ds-tabs button { font: inherit; font-weight: 700; min-height: 38px; min-width: 100px; padding: 0.48rem 0.85rem; color: #163532; background: #e1ddcf; border: 1px solid rgba(22,53,50,0.28); border-bottom: 0; border-radius: 7px 7px 0 0; cursor: pointer; } .ds-tabs button[aria-selected=\"true\"] { color: #153f43; background: #f8f4e8; box-shadow: inset 0 -3px #b98b3d; } .ds-tabs button:focus-visible { outline: 4px solid #f0b94f; outline-offset: 3px; }"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Hold-allocation and purchase field. The error slot is reserved so validation text never shifts layout.",
+      "html": "<div class=\"ds-field\"><label for=\"ds-water\">Water <span>tonnes</span></label><input id=\"ds-water\" type=\"number\" value=\"18\" /><small>Fixed hold reserves 6 t before allocation.</small><p class=\"ds-field-error\">Allocation exceeds available hold by 3 t.</p></div>",
+      "css": ".ds-field { display: grid; gap: 0.35rem; } .ds-field label { font-weight: 800; font-size: 0.76rem; letter-spacing: 0.08em; text-transform: uppercase; color: #163532; } .ds-field label span { color: #62716b; font-weight: 500; text-transform: none; letter-spacing: normal; } .ds-field input { font: inherit; width: 100%; padding: 0.72rem 0.8rem; color: #163532; background: #fffdf7; border: 1px solid #8b9993; border-radius: 6px; } .ds-field input:focus-visible { outline: 4px solid #f0b94f; outline-offset: 3px; } .ds-field small { color: #62716b; } .ds-field-error { margin: 0; min-height: 1.2em; color: #843725; font-size: 0.8rem; line-height: 1.4; }"
+    },
+    {
+      "name": "Confidence Chip",
+      "kind": "chip",
+      "refersTo": "confidence-chip",
+      "description": "Fact confidence carried by border style on a transparent chip — dashed, double, solid, or struck through. Never a filled pill.",
+      "html": "<span class=\"ds-chip ds-chip-rumoured\">Rumoured</span> <span class=\"ds-chip ds-chip-observed\">Observed</span> <span class=\"ds-chip ds-chip-confirmed\">Confirmed</span> <s class=\"ds-chip-disproved\">Disproved</s>",
+      "css": ".ds-chip { display: inline-block; padding: 0.18rem 0.42rem; border: 1px solid currentColor; background: transparent; font-size: 0.69rem; font-weight: 800; text-transform: uppercase; } .ds-chip-rumoured { border-style: dashed; color: #7c6339; } .ds-chip-observed { border-style: double; color: #286f6c; } .ds-chip-confirmed { border-width: 2px; color: #245d42; } .ds-chip-disproved { color: #8b3f30; text-decoration: line-through; font-size: 0.69rem; font-weight: 800; text-transform: uppercase; }"
+    },
+    {
+      "name": "Ruled Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "The default readable surface: square corners, hairline border, and one thick colored left rule naming its kind.",
+      "html": "<section class=\"ds-panel\"><p class=\"ds-eyebrow\">Chart room</p><h2>Estimated Atlantic position</h2><p class=\"ds-panel-body\">The marker is the crew's estimate. The ellipse shows uncertainty; actual landfall depends on hidden reality.</p></section>",
+      "css": ".ds-panel { padding: clamp(1.2rem, 3vw, 2rem); background: #f8f4e8; border: 1px solid rgba(22,53,50,0.18); border-left: 5px solid #2f7875; box-shadow: 0 24px 60px rgba(29,45,42,0.13); } .ds-panel h2 { margin: 0 0 0.75rem; font-family: Georgia, 'Times New Roman', serif; font-size: 2rem; line-height: 1.15; letter-spacing: -0.02em; color: #163532; } .ds-eyebrow { margin: 0 0 0.45rem; color: #2f7875; font-size: 0.73rem; font-weight: 850; letter-spacing: 0.16em; line-height: 1.2; text-transform: uppercase; } .ds-panel-body { margin: 0; max-width: 62ch; color: #62716b; font-size: 1.08rem; line-height: 1.65; }"
+    },
+    {
+      "name": "Critical Status Strip",
+      "kind": "custom",
+      "refersTo": "status-bar",
+      "description": "The instrument counterpart to the paper panels: deep-sea cells, uppercase micro-labels against white values, truncating rather than wrapping.",
+      "html": "<div class=\"ds-status\"><span>Water <strong>14 t</strong></span><span>Provisions <strong>9 t</strong></span><span>Crew <strong>23</strong></span><span>Hull <strong>71%</strong></span><span>Morale <strong>Steady</strong></span></div>",
+      "css": ".ds-status { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); overflow: hidden; color: #d5e3df; background: #153f43; border: 1px solid rgba(255,255,255,0.08); } .ds-status span { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 0.35rem; padding: 0.38rem 0.55rem; border-right: 1px solid rgba(255,255,255,0.13); color: #bdd2cc; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; } .ds-status span:last-child { border-right: 0; } .ds-status strong { overflow: hidden; color: #fff; font-size: 0.84rem; letter-spacing: 0; text-overflow: ellipsis; white-space: nowrap; }"
+    },
+    {
+      "name": "Session Briefing Bar",
+      "kind": "custom",
+      "refersTo": "status-bar",
+      "description": "The dark frame above the cockpit workspace: mission, milestone, date, autosave, and a wrapping warnings row.",
+      "html": "<section class=\"ds-briefing\" aria-label=\"Mission and current milestone\"><div><span>Mission</span><p><strong>Recognise the Cape region.</strong> Return the ship or a useful report to Lisbon.</p></div><div class=\"ds-briefing-milestone\"><span>Current milestone</span><strong>Southbound from Cape Verde</strong><small>Objective not yet recognised.</small></div><div class=\"ds-briefing-meta\"><span>14 June 1488 · day 74</span><span><i class=\"ds-save-dot\"></i>Saved · after day 74</span></div><div class=\"ds-briefing-warnings\"><p>Warning: water below fourteen days at current ration.</p></div></section>",
+      "css": ".ds-briefing { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(230px, 0.8fr) auto; align-items: center; gap: 0.55rem 1rem; padding: 0.55rem 0.75rem; color: #eef5f1; background: #0d2b2f; border-left: 4px solid #b98b3d; box-shadow: 0 7px 20px rgba(13,43,47,0.12); } .ds-briefing > div { min-width: 0; } .ds-briefing span { display: block; margin-bottom: 0.18rem; color: #d9b86f; font-size: 0.65rem; font-weight: 850; letter-spacing: 0.12em; text-transform: uppercase; } .ds-briefing p { margin: 0; color: #d7e3df; font-size: 0.8rem; line-height: 1.32; } .ds-briefing p strong { color: #fff; } .ds-briefing-milestone { display: grid; gap: 0.12rem; } .ds-briefing-milestone strong { color: #fff; font: 1.08rem Georgia, 'Times New Roman', serif; } .ds-briefing-milestone small { color: #b9cdc7; font-size: 0.7rem; line-height: 1.25; } .ds-briefing-meta { display: grid; justify-items: end; gap: 0.3rem; color: #d6e3df; font-size: 0.72rem; white-space: nowrap; } .ds-briefing-meta span { margin: 0; color: #c3d7d0; font-weight: 750; letter-spacing: normal; text-transform: none; } .ds-save-dot { display: inline-block; width: 0.55rem; height: 0.55rem; margin-right: 0.35rem; border-radius: 50%; background: #78b79e; border: 1px solid currentColor; } .ds-briefing-warnings { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; padding-top: 0.35rem; border-top: 1px solid rgba(255,255,255,0.16); } .ds-briefing-warnings p { color: #ffd9c9; font-size: 0.72rem; font-weight: 750; line-height: 1.25; }"
+    },
+    {
+      "name": "Chart Marks",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "The system's centerpiece vocabulary: dashed rust estimate, gold hatched uncertainty ellipse, halo'd labels. Solid tracks appear only in the finalized report.",
+      "html": "<svg class=\"ds-chart\" viewBox=\"0 0 400 240\" role=\"img\" aria-labelledby=\"ds-chart-title ds-chart-desc\"><title id=\"ds-chart-title\">Estimated position chart</title><desc id=\"ds-chart-desc\">The dotted track is the crew's estimate. The hatched ellipse is uncertainty, not a coastline.</desc><defs><pattern id=\"ds-hatch\" width=\"10\" height=\"10\" patternUnits=\"userSpaceOnUse\" patternTransform=\"rotate(45)\"><line x1=\"0\" y1=\"0\" x2=\"0\" y2=\"10\" class=\"ds-hatch-line\"/></pattern></defs><rect x=\"12\" y=\"12\" width=\"376\" height=\"216\" rx=\"18\" class=\"ds-chart-water\"/><line x1=\"12\" y1=\"90\" x2=\"388\" y2=\"90\" class=\"ds-chart-grid\"/><line x1=\"12\" y1=\"160\" x2=\"388\" y2=\"160\" class=\"ds-chart-grid\"/><polyline points=\"60,60 130,95 200,120 258,150\" class=\"ds-estimated-track\"/><ellipse cx=\"258\" cy=\"150\" rx=\"62\" ry=\"40\" class=\"ds-uncertainty-ellipse\"/><circle cx=\"258\" cy=\"150\" r=\"7\" class=\"ds-estimated-position\"/><polygon points=\"92,190 104,178 116,190 104,202\" class=\"ds-landmark\"/><text x=\"104\" y=\"218\" text-anchor=\"middle\" class=\"ds-chart-label\">Cape Verde</text></svg>",
+      "css": ".ds-chart { display: block; width: 100%; } .ds-chart-water { fill: #d8e6df; stroke: #67857d; stroke-width: 2; } .ds-chart-grid { stroke: #8ba69e; stroke-width: 1; stroke-dasharray: 2 9; } .ds-estimated-track { fill: none; stroke: #a64f35; stroke-width: 4; stroke-dasharray: 4 9; stroke-linecap: round; } .ds-uncertainty-ellipse { fill: url(#ds-hatch); stroke: #b98b3d; stroke-width: 3; stroke-dasharray: 10 5; } .ds-hatch-line { stroke: #b98b3d; stroke-width: 3; opacity: 0.45; } .ds-estimated-position { fill: #fff7df; stroke: #a64f35; stroke-width: 4; } .ds-landmark { fill: #153f43; stroke: #f5d68d; stroke-width: 3; } .ds-chart-label { fill: #102b2a; font-size: 13px; font-weight: 800; paint-order: stroke; stroke: #d8e6df; stroke-width: 4px; }"
+    },
+    {
+      "name": "Hold Meter",
+      "kind": "custom",
+      "refersTo": "panel-inset",
+      "description": "The one pill shape in the system — a ticked gauge, not a progress bar. Diagonal teal hatching fills the allocated portion.",
+      "html": "<div class=\"ds-hold-meter\"><span style=\"width: 72%\"></span></div><p class=\"ds-hold-caption\">18 of 25 t allocated · 7 t remaining</p>",
+      "css": ".ds-hold-meter { width: 100%; height: 20px; overflow: hidden; background: repeating-linear-gradient(90deg, #ded8c7 0, #ded8c7 calc(10% - 1px), #f8f4e8 calc(10% - 1px), #f8f4e8 10%); border: 1px solid rgba(22,53,50,0.18); border-radius: 99px; } .ds-hold-meter span { display: block; height: 100%; background: repeating-linear-gradient(135deg, #2f7875 0, #2f7875 10px, #4e918b 10px, #4e918b 20px); } .ds-hold-caption { margin: 0.4rem 0 0; color: #62716b; font-size: 0.83rem; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Navigator's Working Chart",
+    "overview": "The interface is the table in the chart room, not a dashboard about one. Everything on screen is something the crew drew, measured, or wrote down: a ruled sheet of aged paper, a track inked day by day, a hatched ellipse where the position is only guessed at, brass instruments laid across the top. The player is reading working documents produced by their own expedition, and those documents are allowed to be wrong.\n\nThat single idea resolves nearly every visual question. Uncertainty gets drawn, never smoothed away — dashes, hatching, and dotted rules are the system's most important marks. Certainty gets solid weight, and it is rationed. Warm paper carries everything the player reads at length; deep sea-teal carries the fixed bars that report the ship's condition, so the eye learns instantly which surfaces are documents and which are instruments.\n\nThe system runs at two densities, and both are the real system. The document density (Outfitting, After-action) breathes: large serif headings, generous panels, a scroll. The cockpit density (Expedition, Interrupt) fills exactly one viewport with no page scroll at all, panels sized in tenths of a rem so a decision never sits below the fold. Same palette, same materials, same voice — the cockpit simply tightens every measurement. A new screen must declare which density it belongs to before anything else is decided.",
+    "keyCharacteristics": [
+      "Aged paper on a warm desk, with deep sea-teal reserved for instrument bars and reports",
+      "Serif headings and serif numerals; sans-serif for everything read in quantity",
+      "Dashed, hatched, and dotted marks mean estimated; solid weight means established",
+      "Two densities — document and cockpit — sharing one material world",
+      "Hairline borders and tonal stacking do the structural work; shadows only lift what floats",
+      "Uppercase micro-labels at heavy weight and wide tracking, used as index tabs on every block"
+    ],
+    "rules": [
+      { "name": "The Two-Accent Rule", "body": "Brass Divider and Iron-Gall Rust are the only accents. Gold means this is an estimate or an instrument reading; rust means this is written testimony, a warning, or an error. Neither is decorative, and a third accent is not available — a new state gets expressed through tone, weight, or stroke pattern instead.", "section": "colors" },
+      { "name": "The Revealed-Only-After Rule", "body": "A solid track line with Marker Gold dots exists on exactly one surface: the finalized after-action chart. During a live expedition every route mark is dashed rust. Nothing in a running session may render true position in any color.", "section": "colors" },
+      { "name": "The Confidence-Has-a-Border Rule", "body": "Fact confidence is carried by border style on a transparent chip, not by fill: dashed for rumoured (#7c6339), double for observed (#286f6c), 2px solid for confirmed (#245d42), and struck-through text for disproved (#8b3f30). The chip never becomes a filled pill.", "section": "colors" },
+      { "name": "The Serif-Carries-Consequence Rule", "body": "Georgia is for headings and for numbers the player makes decisions against. Ordinary interface numerals — day counts in a log gutter, quantities inside a field — stay in the sans. If a number would change what the player does next, it is set in the serif.", "section": "typography" },
+      { "name": "The Eyebrow-Index Rule", "body": "Every substantial block opens with an uppercase micro-label naming what it is (Chart room, Current decision, Mission). At cockpit density, where headings shrink toward each other, that label is the primary way the eye indexes the screen.", "section": "typography" },
+      { "name": "The No-Page-Scroll Rule", "body": "Expedition and Interrupt fit one viewport at every supported size. Content that outgrows its box gets a bounded internal scroll, a max-height, or ellipsis — never a taller page. A decision the player must make is never below the fold.", "section": "layout" },
+      { "name": "The Min-Zero Rule", "body": "Every grid and flex child in the cockpit declares min-width: 0 and min-height: 0. Without it a single long fact string blows out the column and breaks the fixed-viewport contract.", "section": "layout" },
+      { "name": "The Nested-Panels-Don't-Both-Lift Rule", "body": "A panel inside a panel loses its shadow and keeps its border. Only the outermost floating surface casts.", "section": "elevation" },
+      { "name": "The Square-By-Default Rule", "body": "If a shape is not a control the player clicks or types into, it has square corners. Radius is an affordance signal, not a style.", "section": "shapes" },
+      { "name": "The Dashed-Means-Doubtful Rule", "body": "Any dashed or hatched edge in the system means uncertainty — an estimated route, an uncertainty ellipse, a rumoured fact, an unavailable choice. Never use a dashed border decoratively.", "section": "shapes" },
+      { "name": "The Legend-Says-It-In-Words Rule", "body": "Every chart mark that carries meaning appears in the legend as prose (Estimated track, dotted), and the SVG description states plainly that the ellipse is uncertainty, not a coastline. Color and stroke are never the only carrier of meaning.", "section": "components" }
+    ],
+    "dos": [
+      "Do declare a screen's density first — document (scrolls, clamp(1.5rem, 4vw, 4rem) rhythm) or cockpit (100dvh, sub-rem rhythm) — and use only that scale within it.",
+      "Do draw uncertainty as dashes, hatching, or a dotted rule, and reserve solid weight for what the crew has established.",
+      "Do open every block with an uppercase eyebrow label naming what it is.",
+      "Do set consequential numbers in Georgia at regular weight (1.45rem tiles, 1.85rem for the range callout).",
+      "Do structure with hairline borders and thick colored left rules before reaching for a shadow.",
+      "Do put the reason an action is unavailable inside the disabled button's <small>, next to the control it explains.",
+      "Do keep the 4px #f0b94f focus outline at 3px offset on every interactive element, including SVG chart symbols.",
+      "Do set min-width: 0 and min-height: 0 on cockpit grid children, and give scrolling regions overscroll-behavior: contain.",
+      "Do reserve the error slot under a field so validation messages never shift layout."
+    ],
+    "donts": [
+      "Don't drift toward a generic SaaS dashboard: no rounded metric cards, no blue accents, no filled pill badges, no icon-plus-number tiles. Square corners, ruled edges, and the two-accent palette are what keep this from happening.",
+      "Don't reach for retro-terminal shorthand — monospace body text, scanlines, phosphor green, ASCII rules. The world is paper and brass, not a CRT.",
+      "Don't introduce a third accent color. Express a new state through tone, border weight, or stroke pattern.",
+      "Don't render true position, a solid route line, or Marker Gold dots anywhere except the finalized after-action chart.",
+      "Don't load a web font, remote image, or any external asset. Nothing may leave the machine, so the Georgia/Inter stack must degrade to platform faces gracefully.",
+      "Don't let a cockpit screen grow a page scroll; bound the panel instead.",
+      "Don't stack shadows — a panel inside a panel keeps its border and drops its cast.",
+      "Don't use a dashed border decoratively; dashes mean doubt.",
+      "Don't round anything that is not a control the player clicks or types into. The hold-meter pill and the wax seal are the only exceptions.",
+      "Don't rely on color alone for a state. Confidence uses border style, chart marks are named in the legend, and warnings carry the word Warning."
+    ]
+  }
+}

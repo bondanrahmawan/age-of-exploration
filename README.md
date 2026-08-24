@@ -54,5 +54,6 @@ pnpm test:e2e
 builds the local browser application to the ignored `app-dist/` directory.
 The fixture and catalogue scripts build only the engine before running.
 
-See `docs/wp5-player-facing-base-game.md` for architecture and
+See [PRODUCT.md](PRODUCT.md) for the product brief,
+`docs/wp5-player-facing-base-game.md` for architecture, and
 `docs/wp5-acceptance.md` for the honest §34.15 gate matrix.

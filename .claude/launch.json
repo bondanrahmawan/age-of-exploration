@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "aoe-e2e",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["vite", "--host", "127.0.0.1", "--port", "4176", "--mode", "e2e"],
+      "port": 4176
+    }
+  ]
+}

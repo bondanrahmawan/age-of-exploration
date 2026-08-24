@@ -23,6 +23,7 @@ app/view-model.ts            allow-listed UI projections and validation
 app/storage.ts               campaign-save and separate preference adapters
 app/seed.ts                  injectable expedition seed ownership
 app/components/              four product-screen presentations
+app/components/SessionBriefing.tsx  active-session mission hierarchy
 app/e2e-environment.ts       e2e-mode-only short deterministic route
 play.cmd                     one-step Windows player entrypoint
 scripts/play.mjs             build identity and loopback static-server owner
@@ -74,17 +75,69 @@ Outfitting
                  └─ prepare next expedition → Outfitting
 ```
 
-- **Outfitting** shows reported knowledge, prior finalized summaries, four
+- **Outfitting** opens with a compact mission and outfitting decision instead
+  of decorative product branding, then shows reported knowledge, prior finalized summaries, four
   stores, fixed and allocatable hold, cost, money, adjacent validation, and a
   clearly labelled projected-range estimate.
-- **Expedition** coordinates Chart, Deck, and Log tabs with all 16 headings,
-  three sailing policies, four ration combinations, intent, repairs, single-day
-  advance, and advance-until-interrupted.
+- **Expedition** is a fixed-height command workspace. A persistent briefing,
+  critical-condition strip, standing-order rail, and flexible Chart/Deck/Log
+  region coordinate all 16 headings, three sailing policies, four ration
+  combinations, intent, repairs, single-day advance, and
+  advance-until-interrupted.
 - **Interrupt** is the consistent event, landfall, survival, port, Cape, and
-  finalization surface. Disabled options retain their requirement or rejection
-  reason. All existing Cape Verde and Cape commands are mapped.
+  finalization surface inside the same fixed-height session. Disabled options
+  retain their requirement or rejection reason. All existing Cape Verde and
+  Cape commands are mapped.
 - **After-action report** uses only finalized WP4 report data and is the sole
   screen that receives actual-route data.
+
+## Compact game-session layout and clarity hierarchy
+
+Expedition and Interrupt use a deliberate `100dvh` shell. The document itself
+has no horizontal or vertical overflow; the active workspace consumes the
+viewport and assigns remaining height with grid/flex `minmax(0, 1fr)` regions.
+Outfitting and the after-action report remain longer reading surfaces inside
+the application shell because their content is preparatory or retrospective,
+not a time-sensitive command workspace.
+
+The former 64 px desktop/83 px narrow global branding strip and 64 px
+desktop/80 px narrow footer were removed, together with the large repeated
+expedition title. Before remediation, the Expedition screen overflowed by 918,
+928, 683, and 951 px at 1280×720, 1366×768, 1920×1080, and 520×900. The event
+interrupt overflowed by 250, 216, 0, and 226 px; Cape Verde overflowed by 878,
+850, 602, and 1817 px. The remediated Expedition, landfall/event Interrupt,
+Cape Verde, Cape, and finalization states measure 0 px document overflow in
+both axes at all four viewports.
+
+The information hierarchy is now:
+
+1. persistent mission: recognise the Cape, return the ship or useful report,
+   and optionally improve the chart;
+2. player-visible milestone and objective status;
+3. critical water, provisions, crew condition, hull, and warnings;
+4. current decision with one visually dominant advance or transition action;
+5. the last committed result beside that decision;
+6. flexible Chart, Deck, and Log information.
+
+Milestone and last-result presentation fields are derived only from the
+allow-listed `JourneyPlayerView`: visible location, objective status, expedition
+intent, date/day, and safe written-log entries. The controller remains the sole
+`CampaignState` owner.
+
+On ordinary sailing days, heading, sailing policy, rations, and expedition
+intent form one order group. “Advance until interrupted” is dominant and says
+that it sails one day at a time and stops before a decision. Animation is a
+compact presentation preference beside the information tabs, not a competing
+gameplay order. The active chart legend and accessible description explicitly say
+that its marker is the crew's estimate and the ellipse is uncertainty rather
+than a coastline; it does not reveal actual position.
+
+Interrupts preserve the same mission, milestone, critical condition, last
+result, and autosave context. Event choices use a bounded focusable region when
+their content exceeds the remaining height. Cape Verde pins Deposit report,
+Turn home, and Depart Cape Verde above a separate keyboard-scrollable stores
+and services region, so the leg decision never disappears with the long port
+catalogue.
 
 ## Chart allow-list and hidden truth
 
@@ -147,12 +200,12 @@ animation own no simulation randomness.
 
 The Chromium timing path commits five uneventful days through the real controls
 in skipped mode and requires less than five seconds. The final validation run
-measured 96 ms at desktop width and 94 ms at 520 px width. No 45–90 minute Cape-attempt
+measured 101 ms at desktop width and 117 ms at 520 px width. No 45–90 minute Cape-attempt
 claim is made without a genuine human playthrough.
 
 ## Accessibility and responsive behavior
 
-- Every operation is a native button, input, select, tab, link, or details
+- Every operation is a native button, input, select, tab, or link
   control with visible focus.
 - Day advance has a native button and `D` keyboard shortcut; Escape requests a
   between-day stop.
@@ -161,9 +214,12 @@ claim is made without a genuine human playthrough.
   symbols, numeric uncertainty, and a text/pattern/shape legend.
 - Confidence and warnings include status text and border patterns; neither
   relies on colour alone.
-- The written log is independent of animation.
-- Responsive checks run the real browser flow at 520 px and assert no horizontal
-  document overflow.
+- The written log is independent of animation. Deck, Log, long event choices,
+  and Cape Verde operations are focusable bounded regions with explicit
+  Page Up/Page Down/Home/End keyboard scrolling.
+- Real-browser checks cover 1280×720, 1366×768, 1920×1080, and 520×900. They
+  assert no active-session document overflow and keep mission, milestone,
+  critical status, current decision, and the primary action inside the viewport.
 
 ## Balance assessment
 

@@ -129,6 +129,7 @@ export interface DeckViewModel {
   readonly sailingPolicy: SailingPolicy;
   readonly rationPolicy: RationPolicy;
   readonly expeditionIntent: string;
+  readonly expeditionIntentValue: JourneyPlayerView["survival"]["expeditionIntent"];
 }
 
 export interface LogEntryViewModel {
@@ -139,12 +140,19 @@ export interface LogEntryViewModel {
 }
 
 export interface ExpeditionViewModel {
+  readonly mission: MissionProgressViewModel;
   readonly chart: ChartViewModel;
   readonly deck: DeckViewModel;
   readonly log: readonly LogEntryViewModel[];
+  readonly lastResult: LogEntryViewModel | null;
   readonly headings: typeof HEADINGS;
   readonly sailingPolicies: typeof SAILING_POLICIES;
   readonly rationPolicies: typeof RATION_POLICIES;
+}
+
+export interface MissionProgressViewModel {
+  readonly milestone: string;
+  readonly status: string;
 }
 
 export interface ChoiceViewModel {
@@ -160,6 +168,10 @@ export interface InterruptViewModel {
   readonly kind: "event" | "cape_verde" | "cape" | "landfall" | "survival" | "terminal";
   readonly title: string;
   readonly description: string;
+  readonly date: string;
+  readonly elapsedDays: number;
+  readonly mission: MissionProgressViewModel;
+  readonly lastResult: LogEntryViewModel | null;
   readonly choices: readonly ChoiceViewModel[];
   readonly location: string;
   readonly stores: StoresState;
@@ -352,8 +364,28 @@ function logEntry(entry: Readonly<CanonicalLogEntry>): LogEntryViewModel {
   };
 }
 
+function missionProgress(active: Readonly<JourneyPlayerView>): MissionProgressViewModel {
+  const objectiveAchieved = active.journey.objectiveAchieved;
+  const returning = active.survival.expeditionIntent !== "pursue_objective";
+  const usedCapeVerde = active.log.some((entry) => entry.type === "survival_action" && entry.result.kind === "left_cape_verde_port");
+  let milestone: string;
+  if (active.journey.outcome !== null) milestone = "Finalize the expedition";
+  else if (active.journey.location === "cape") milestone = "Survey and collect evidence";
+  else if (active.journey.location === "cape_verde") milestone = objectiveAchieved ? "Deposit or return the report" : "Use Cape Verde and choose the next leg";
+  else if (objectiveAchieved || returning) milestone = "Return to Lisbon";
+  else if (usedCapeVerde) milestone = "Seek the Cape";
+  else milestone = "Reach or use Cape Verde";
+  const status = objectiveAchieved
+    ? "Cape recognised; secure the ship's return or a useful report."
+    : active.survival.expeditionIntent === "objective_abandoned"
+      ? "Cape objective abandoned; bring the ship or report home."
+      : "Cape recognition is still required.";
+  return { milestone, status };
+}
+
 function buildExpedition(active: Readonly<JourneyPlayerView>): ExpeditionViewModel {
   const track = estimatedTrack(active);
+  const safeLog = active.log.map(logEntry).reverse();
   const landmarkLabel = (id: string) => id.includes("cape-verde") ? "Cape Verde / Santiago"
     : id.includes("cape-goal") ? "Broad Cape goal region"
       : id.includes("lisbon") ? "Lisbon"
@@ -371,6 +403,7 @@ function buildExpedition(active: Readonly<JourneyPlayerView>): ExpeditionViewMod
   ] : []);
   const observedWind = `${active.navigation.observedWind.strength} wind from ${active.navigation.observedWind.fromHeading ?? "variable"}`;
   return {
+    mission: missionProgress(active),
     chart: {
       estimatedPosition: {
         day: active.committedDay,
@@ -404,8 +437,10 @@ function buildExpedition(active: Readonly<JourneyPlayerView>): ExpeditionViewMod
       sailingPolicy: active.sailingPolicy,
       rationPolicy: active.rationPolicy,
       expeditionIntent: titleCase(active.survival.expeditionIntent),
+      expeditionIntentValue: active.survival.expeditionIntent,
     },
-    log: active.log.map(logEntry).reverse(),
+    log: safeLog,
+    lastResult: safeLog[0] ?? null,
     headings: HEADINGS,
     sailingPolicies: SAILING_POLICIES,
     rationPolicies: RATION_POLICIES,
@@ -506,6 +541,10 @@ function buildInterrupt(active: Readonly<JourneyPlayerView>, reportDeposited: bo
     kind,
     title,
     description,
+    date: active.date,
+    elapsedDays: active.committedDay,
+    mission: missionProgress(active),
+    lastResult: active.log.length === 0 ? null : logEntry(active.log.at(-1)!),
     choices: buildEventChoices(active),
     location: active.journey.location,
     stores: { ...active.stores },
@@ -524,10 +563,10 @@ function buildInterrupt(active: Readonly<JourneyPlayerView>, reportDeposited: bo
     outcomeReason: active.journey.outcome?.reason ?? null,
     statusMessage: active.survival.status.kind === "active" ? null : active.survival.status.message,
     warnings: active.survival.warnings.map((warning) => warning.message),
-    canRecogniseCape: active.navigation.landfall.kind === "visible_unrecognised"
+    canRecogniseCape: active.journey.location === "at_sea" && (active.navigation.landfall.kind === "visible_unrecognised"
       || (active.navigation.landfall.kind === "recognised"
-        && active.navigation.landfall.landmarkId.includes("cape-goal")),
-    canEnterCapeVerde: active.navigation.landfall.kind === "recognised"
+        && active.navigation.landfall.landmarkId.includes("cape-goal"))),
+    canEnterCapeVerde: active.journey.location === "at_sea" && active.navigation.landfall.kind === "recognised"
       && active.navigation.landfall.landmarkId.includes("cape-verde"),
     canDismiss: pending === null && active.journey.outcome === null
       && active.survival.status.kind === "active"

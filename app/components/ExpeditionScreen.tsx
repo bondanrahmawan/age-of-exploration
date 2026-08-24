@@ -1,18 +1,32 @@
 import { useEffect } from "preact/hooks";
+import type { JSX } from "preact";
 import { SHIP_COMPONENTS } from "../../src/index.js";
 import type { GameActions } from "../controller.js";
 import type { AnimationMode, ExpeditionPanel, ExpeditionViewModel } from "../view-model.js";
 import { shipComponentCondition } from "../view-model.js";
 import { ActiveChart } from "./ActiveChart.js";
+import { SessionBriefing } from "./SessionBriefing.js";
 
 const titleCase = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const tonnes = (kg: number) => `${(kg / 1_000).toFixed(2)} t`;
 const percent = (bps: number) => `${(bps / 100).toFixed(0)}%`;
 
+function handleBoundedScrollKeyDown(event: JSX.TargetedKeyboardEvent<HTMLElement>) {
+  if (event.target !== event.currentTarget) return;
+  const region = event.currentTarget;
+  const page = Math.max(40, region.clientHeight * .8);
+  if (event.key === "PageDown") region.scrollTop += page;
+  else if (event.key === "PageUp") region.scrollTop -= page;
+  else if (event.key === "Home") region.scrollTop = 0;
+  else if (event.key === "End") region.scrollTop = region.scrollHeight;
+  else return;
+  event.preventDefault();
+}
+
 function DeckPanel({ model, controller }: { readonly model: ExpeditionViewModel; readonly controller: GameActions }) {
   const deck = model.deck;
   return (
-    <section class="deck-panel" aria-labelledby="deck-title">
+    <section class="deck-panel" aria-labelledby="deck-title" tabIndex={0} onKeyDown={handleBoundedScrollKeyDown}>
       <div class="section-heading"><div><p class="eyebrow">Deck state</p><h2 id="deck-title">Ship, crew, and stores</h2></div><p>{deck.date} · day {deck.elapsedDays}</p></div>
       <div class="stat-grid">
         <article><span>Water</span><strong>{tonnes(deck.stores.waterKg)}</strong></article>
@@ -57,7 +71,7 @@ function DeckPanel({ model, controller }: { readonly model: ExpeditionViewModel;
 
 function LogPanel({ model }: { readonly model: ExpeditionViewModel }) {
   return (
-    <section class="log-panel" aria-labelledby="log-title">
+    <section class="log-panel" aria-labelledby="log-title" tabIndex={0} onKeyDown={handleBoundedScrollKeyDown}>
       <div class="section-heading"><div><p class="eyebrow">Written record</p><h2 id="log-title">Expedition log</h2></div><p>{model.log.length} committed entries</p></div>
       {model.log.length === 0 ? <p class="empty-state">The log is ready for the first order.</p> : (
         <ol class="log-list">
@@ -68,11 +82,12 @@ function LogPanel({ model }: { readonly model: ExpeditionViewModel }) {
   );
 }
 
-export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvancing, controller }: {
+export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvancing, autosaveBoundary, controller }: {
   readonly model: ExpeditionViewModel;
   readonly selectedPanel: ExpeditionPanel;
   readonly animationMode: AnimationMode;
   readonly isAdvancing: boolean;
+  readonly autosaveBoundary: string;
   readonly controller: GameActions;
 }) {
   useEffect(() => {
@@ -90,54 +105,96 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
   }, [controller, isAdvancing]);
 
   return (
-    <main id="main-content" class="screen expedition-screen" data-screen="expedition">
-      <header class="expedition-header">
-        <div><p class="eyebrow">Expedition {model.deck.date}</p><h1>The uncertain sea</h1><p>{model.deck.location} · day {model.deck.elapsedDays}</p></div>
-        <div class="compact-stores" aria-label="Quick stores status"><span>Water <strong>{tonnes(model.deck.stores.waterKg)}</strong></span><span>Provisions <strong>{tonnes(model.deck.stores.provisionsKg)}</strong></span><span>Morale <strong>{percent(model.deck.crew.moraleBps)}</strong></span></div>
-      </header>
+    <main id="main-content" class="screen session-screen expedition-screen" data-screen="expedition">
+      <SessionBriefing
+        milestone={model.mission.milestone}
+        missionStatus={model.mission.status}
+        date={model.deck.date}
+        elapsedDays={model.deck.elapsedDays}
+        autosaveBoundary={autosaveBoundary}
+        warnings={model.deck.warnings}
+      />
 
-      <section class="command-rail" aria-labelledby="orders-title">
-        <div class="order-heading"><p class="eyebrow">Standing orders</p><h2 id="orders-title">Set the next day</h2></div>
-        <label>Heading
-          <select value={model.deck.heading} onChange={(event) => controller.setHeading(event.currentTarget.value as typeof model.deck.heading)}>
-            {model.headings.map((heading) => <option key={heading} value={heading}>{heading}</option>)}
-          </select>
-        </label>
-        <label>Sailing policy
-          <select value={model.deck.sailingPolicy} onChange={(event) => controller.setSailingPolicy(event.currentTarget.value as typeof model.deck.sailingPolicy)}>
-            {model.sailingPolicies.map((policy) => <option key={policy} value={policy}>{titleCase(policy)}</option>)}
-          </select>
-        </label>
-        <label>Ration policy
-          <select value={model.deck.rationPolicy} onChange={(event) => controller.setRationPolicy(event.currentTarget.value as typeof model.deck.rationPolicy)}>
-            {model.rationPolicies.map((policy) => <option key={policy} value={policy}>{titleCase(policy)}</option>)}
-          </select>
-        </label>
-        <label>Animation
-          <select value={animationMode} onChange={(event) => controller.setAnimationMode(event.currentTarget.value as AnimationMode)}>
-            <option value="normal">Normal</option><option value="reduced">Reduced</option><option value="skipped">Skipped</option>
-          </select>
-        </label>
-        <div class="day-controls">
-          <button class="primary" type="button" disabled={isAdvancing} aria-keyshortcuts="D" onClick={() => controller.advanceOneDay()}>Advance one day <kbd>D</kbd></button>
-          <button type="button" disabled={isAdvancing} onClick={() => void controller.advanceUntilInterrupted()}>Advance until interrupted</button>
-          <button type="button" disabled={!isAdvancing} aria-keyshortcuts="Escape" onClick={() => controller.stopAdvance()}>Stop between days</button>
-        </div>
-        <details class="intent-controls">
-          <summary>Expedition intent</summary>
-          <div class="button-row">
-            <button type="button" onClick={() => controller.dispatchSimulation({ type: "set_expedition_intent", intent: "pursue_objective" })}>Continue objective</button>
-            <button type="button" onClick={() => controller.dispatchSimulation({ type: "set_expedition_intent", intent: "return_to_lisbon" })}>Turn home</button>
-            <button type="button" onClick={() => controller.dispatchSimulation({ type: "set_expedition_intent", intent: "objective_abandoned" })}>Abandon objective</button>
+      <aside class="critical-status" aria-label="Critical expedition status">
+        <span>Water <strong>{tonnes(model.deck.stores.waterKg)}</strong></span>
+        <span>Provisions <strong>{tonnes(model.deck.stores.provisionsKg)}</strong></span>
+        <span>Health <strong>{percent(model.deck.crew.healthBps)}</strong></span>
+        <span>Morale <strong>{percent(model.deck.crew.moraleBps)}</strong></span>
+        <span>Hull <strong>{percent(model.deck.ship.hullBps)}</strong></span>
+      </aside>
+
+      <div class="expedition-workspace">
+        <section class="command-rail" aria-labelledby="orders-title">
+          <div class="order-heading">
+            <p class="eyebrow">Current decision</p>
+            <h1 id="orders-title">Set orders, then sail</h1>
+            <p>Orders remain in force until you change them.</p>
           </div>
-        </details>
-      </section>
+          <div class="order-grid">
+            <label>Heading
+              <select value={model.deck.heading} onChange={(event) => controller.setHeading(event.currentTarget.value as typeof model.deck.heading)}>
+                {model.headings.map((heading) => <option key={heading} value={heading}>{heading}</option>)}
+              </select>
+            </label>
+            <label>Sailing policy
+              <select value={model.deck.sailingPolicy} onChange={(event) => controller.setSailingPolicy(event.currentTarget.value as typeof model.deck.sailingPolicy)}>
+                {model.sailingPolicies.map((policy) => <option key={policy} value={policy}>{titleCase(policy)}</option>)}
+              </select>
+            </label>
+            <label>Ration policy
+              <select value={model.deck.rationPolicy} onChange={(event) => controller.setRationPolicy(event.currentTarget.value as typeof model.deck.rationPolicy)}>
+                {model.rationPolicies.map((policy) => <option key={policy} value={policy}>{titleCase(policy)}</option>)}
+              </select>
+            </label>
+            <label>Expedition intent
+              <select value={model.deck.expeditionIntentValue} onChange={(event) => controller.dispatchSimulation({ type: "set_expedition_intent", intent: event.currentTarget.value as typeof model.deck.expeditionIntentValue })}>
+                <option value="pursue_objective">Continue objective</option>
+                <option value="return_to_lisbon">Turn home</option>
+                <option value="objective_abandoned">Abandon objective</option>
+              </select>
+            </label>
+          </div>
+          <div class="day-controls">
+            <button class="primary primary-action" type="button" disabled={isAdvancing} onClick={() => void controller.advanceUntilInterrupted()}>
+              Advance until interrupted
+              <small>Sail day by day; stop before any decision.</small>
+            </button>
+            <button type="button" disabled={isAdvancing} aria-keyshortcuts="D" onClick={() => controller.advanceOneDay()}>Advance one day <kbd>D</kbd></button>
+            <button type="button" disabled={!isAdvancing} aria-keyshortcuts="Escape" onClick={() => controller.stopAdvance()}>Stop between days</button>
+          </div>
+          <section class="record-rail" aria-label="Committed record" tabIndex={0} onKeyDown={handleBoundedScrollKeyDown}>
+            <p class="eyebrow">Committed record</p>
+            {model.log.length === 0
+              ? <p class="empty-state">No sailing day has been committed yet.</p>
+              : (
+                <ol class="record-list">
+                  {model.log.map((entry, index) => (
+                    <li key={entry.index} class={index === 0 ? "record-latest" : undefined}>
+                      <span>Day {entry.day}{index === 0 ? " · latest" : ""}</span>
+                      <strong>{entry.title}</strong>
+                      <p>{entry.text}</p>
+                    </li>
+                  ))}
+                </ol>
+              )}
+          </section>
+        </section>
 
-      <nav class="panel-tabs" role="tablist" aria-label="Expedition views">
-        {(["chart", "deck", "log"] as const).map((panel) => <button key={panel} type="button" role="tab" id={`tab-${panel}`} aria-selected={selectedPanel === panel} aria-controls={`panel-${panel}`} onClick={() => controller.selectPanel(panel)}>{titleCase(panel)}</button>)}
-      </nav>
-      <div role="tabpanel" id={`panel-${selectedPanel}`} aria-labelledby={`tab-${selectedPanel}`} tabIndex={0}>
-        {selectedPanel === "chart" ? <ActiveChart chart={model.chart} /> : selectedPanel === "deck" ? <DeckPanel model={model} controller={controller} /> : <LogPanel model={model} />}
+        <section class="expedition-view" aria-label="Expedition information views">
+          <div class="view-toolbar">
+            <nav class="panel-tabs" role="tablist" aria-label="Expedition views">
+              {(["chart", "deck", "log"] as const).map((panel) => <button key={panel} type="button" role="tab" id={`tab-${panel}`} aria-selected={selectedPanel === panel} aria-controls={`panel-${panel}`} onClick={() => controller.selectPanel(panel)}>{titleCase(panel)}</button>)}
+            </nav>
+            <label class="animation-control">Motion
+              <select value={animationMode} aria-label="Animation" onChange={(event) => controller.setAnimationMode(event.currentTarget.value as AnimationMode)}>
+                <option value="normal">Normal</option><option value="reduced">Reduced</option><option value="skipped">Skipped</option>
+              </select>
+            </label>
+          </div>
+          <div class={`expedition-panel panel-${selectedPanel}`} role="tabpanel" id={`panel-${selectedPanel}`} aria-labelledby={`tab-${selectedPanel}`} tabIndex={0}>
+            {selectedPanel === "chart" ? <ActiveChart chart={model.chart} /> : selectedPanel === "deck" ? <DeckPanel model={model} controller={controller} /> : <LogPanel model={model} />}
+          </div>
+        </section>
       </div>
     </main>
   );

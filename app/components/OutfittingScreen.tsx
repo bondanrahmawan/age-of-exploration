@@ -42,9 +42,10 @@ function SaveCard({ preview, controller }: { readonly preview: SafeSavePreview; 
   );
 }
 
-export function OutfittingScreen({ model, preview, controller }: {
+export function OutfittingScreen({ model, preview, autosaveBoundary, controller }: {
   readonly model: OutfittingViewModel;
   readonly preview: SafeSavePreview;
+  readonly autosaveBoundary: string;
   readonly controller: GameActions;
 }) {
   const [allocation, setAllocation] = useState<StoresState>({ ...model.allocation });
@@ -55,14 +56,14 @@ export function OutfittingScreen({ model, preview, controller }: {
     setAllocation((current) => ({ ...current, [keyFor(store)]: kilograms }));
   };
   return (
-    <main id="main-content" class="screen outfitting-screen" data-screen="outfitting">
-      <header class="hero">
+    <main id="main-content" class={`screen outfitting-screen${model.campaignReady ? "" : " outfitting-setup"}`} data-screen="outfitting">
+      <header class="hero outfitting-header">
         <div>
           <p class="eyebrow">Lisbon · 1 April 1488</p>
-          <h1>Outfit the uncertain voyage</h1>
-          <p class="lede">A 60-ton caravel, one objective, and a chart made from what earlier crews managed to report.</p>
+          <h1>Outfit and depart</h1>
+          <p class="lede"><strong>Mission:</strong> recognise the Cape region, then return the ship or a useful report to Lisbon. Confirm useful chart knowledge when the voyage permits.</p>
         </div>
-        <div class="ship-seal" aria-hidden="true">AoE</div>
+        <p class="autosave-status"><span class="save-dot" aria-hidden="true" />Saved · {autosaveBoundary}</p>
       </header>
 
       <SaveCard preview={preview} controller={controller} />
@@ -72,7 +73,6 @@ export function OutfittingScreen({ model, preview, controller }: {
           <section class="panel allocation-panel" aria-labelledby="allocation-title">
             <div class="section-heading">
               <div><p class="eyebrow">Hold plan</p><h2 id="allocation-title">Stores and range</h2></div>
-              <p class="range-callout"><span>Projected-range estimate</span><strong>{validation.projectedRangeDays} days</strong><small>At 25 crew, before losses or spoilage</small></p>
             </div>
             <div class="hold-meter" role="meter" aria-label="Allocatable hold used" aria-valuemin={0} aria-valuemax={52} aria-valuenow={Math.max(0, validation.allocatableHoldUsedKg / 1_000)}>
               <span style={{ width: `${Math.min(100, Math.max(0, validation.allocatableHoldUsedKg / 520))}%` }} />
@@ -115,10 +115,15 @@ export function OutfittingScreen({ model, preview, controller }: {
               {validation.capacityError !== null && <p class="validation-error" role="alert">Capacity: {validation.capacityError}</p>}
               {validation.moneyError !== null && <p class="validation-error" role="alert">Money: {validation.moneyError}</p>}
             </div>
-            <button class="primary depart-button" type="button" disabled={!validation.valid} onClick={() => controller.outfitAndDepart(allocation)}>
-              Depart Lisbon
-            </button>
-            {!validation.valid && <p class="disabled-reason">Departure remains disabled until every capacity, money, and stock error is corrected.</p>}
+            <div class="depart-band">
+              <p class="range-callout"><span>Projected-range estimate</span><strong>{validation.projectedRangeDays} days</strong><small>At 25 crew, before losses or spoilage</small></p>
+              <div class="depart-commit">
+                <button class="primary depart-button" type="button" disabled={!validation.valid} onClick={() => controller.outfitAndDepart(allocation)}>
+                  Depart Lisbon
+                </button>
+                {!validation.valid && <p class="disabled-reason">Departure remains disabled until every capacity, money, and stock error is corrected.</p>}
+              </div>
+            </div>
           </section>
 
           <aside class="knowledge-column">

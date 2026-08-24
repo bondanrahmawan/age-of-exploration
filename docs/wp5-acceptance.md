@@ -17,8 +17,8 @@ question into a pass. Commands are run from the repository root.
 | 10 | Determinism | Passed | Determinism suites prove canonical byte equivalence; WP5 tests prove animation mode and render frequency leave campaign save/replay bytes unchanged. | `pnpm test:determinism`; `pnpm test:ui`; `pnpm fixture:wp3`; `pnpm fixture:wp4` | None found. |
 | 11 | Resume | Passed | WP4 determinism tests round-trip ordinary day, pending choice, post-deposit, pre-finalization, and between-run saves; WP5 controller test resumes through safe preview metadata. | `test/campaign-determinism.test.ts`; `test/ui-controller.test.ts` | Browser storage quota failure is reported at command time but is not synthetically forced in E2E. |
 | 12 | Progression | Passed | WP4 tests exclude lost observations and hidden traces; real Chromium completes three runs and sees Cape survey knowledge inherited in runs 2 and 3 while active DOM remains truth-safe. | `test/campaign.test.ts`; `e2e/player-flow.spec.ts`; `pnpm test:e2e` | Qualitative confidence/tension effect remains a §35.2 human question. |
-| 13 | Complete loop | Passed | Desktop and 520 px Chromium flows outfit, depart, use both ports/landfalls, survey/collect, turn home, deposit, finalize, read reports, and begin runs 2 and 3 without direct state manipulation. | `e2e/player-flow.spec.ts`; `pnpm test:e2e` | Browser route is shortened by an e2e-mode deterministic environment; production uses the same commands with authored Atlantic travel. |
-| 14 | Usability | Unverified | Real Chromium proves five skipped-animation days in under five seconds and narrow-window operability. | `e2e/player-flow.spec.ts`; `pnpm test:e2e` | No genuine 45–90 minute human Cape attempt was conducted, so this combined gate cannot pass yet. |
+| 13 | Complete loop | Passed | Chromium flows outfit, depart, use both ports/landfalls, survey/collect, turn home, deposit, finalize, read reports, and begin runs 2 and 3 without direct state manipulation. Fixed-session assertions cover 1280×720, 1366×768, 1920×1080, and 520×900. | `e2e/player-flow.spec.ts`; `pnpm test:e2e` | Browser route is shortened by an e2e-mode deterministic environment; production uses the same commands with authored Atlantic travel. |
+| 14 | Usability | Unverified | Real Chromium proves five skipped-animation days in under five seconds, zero Expedition/Interrupt document overflow at all four target viewports, persistent mission/milestone/critical status/primary action visibility, and keyboard operation of bounded Log and Cape Verde regions. | `e2e/player-flow.spec.ts`; `pnpm test:e2e` | No genuine 45–90 minute human Cape attempt was conducted, so this combined gate cannot pass yet. Automated layout checks do not prove that the hierarchy is clear or fun. |
 | 15 | Content | Passed | Catalogue validation reports 24 events and all quotas; component tests render every authored choice, disabled reason, public requirement, and known consequence. | `pnpm event:validate`; `pnpm test:ui` | Prose quality still benefits from human playtest feedback but mechanical coherence checks pass. |
 
 ## Final automated and browser results
@@ -29,15 +29,18 @@ question into a pass. Commands are run from the repository root.
 - `pnpm test`: 17 files, 151 tests passed
 - `pnpm build`: engine build and production browser build passed
 - `pnpm test:ui`: 2 files, 20 tests passed
-- `pnpm test:e2e`: 6 Chromium paths passed (desktop and 520 px)
-- five-day skipped browser timing: 96 ms desktop, 94 ms narrow in the
+- `pnpm test:e2e`: 8 Chromium paths passed, including fixed-session checks at
+  1280×720, 1366×768, 1920×1080, and 520×900
+- five-day skipped browser timing: 101 ms desktop, 117 ms narrow in the
   final validation run
 - `pnpm test:determinism`: 5 files, 29 tests passed
 - `pnpm event:validate`: 24 events; 8 delayed; 7 remembered; 8
   preparation-softened; 5 fact-producing
 - production bundle scan: the e2e route markers are absent
-- in-app production visual pass: 1280×720 and 520×900; no browser console
-  warnings/errors; narrow document had no horizontal overflow
+- browser layout assertions: Expedition and Interrupt had no vertical or
+  horizontal document overflow at all four target viewports; mission,
+  milestone/current decision, critical status, and primary action stayed in
+  the viewport; bounded Log and Cape Verde regions accepted keyboard scrolling
 
 The WP3 and WP4 fixture hashes remained byte-for-byte unchanged; they are
 listed in the implementation completion report and can be reproduced with

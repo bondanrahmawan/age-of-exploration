@@ -11,7 +11,7 @@ function FactSection({ title, facts, emptyText }: {
   return <section class="report-fact-section"><h3>{title}</h3><FactList facts={facts} emptyText={emptyText} /></section>;
 }
 
-export function AfterActionScreen({ report, controller }: { readonly report: ReportViewModel; readonly controller: GameActions }) {
+export function AfterActionScreen({ report, autosaveBoundary, controller }: { readonly report: ReportViewModel; readonly autosaveBoundary: string; readonly controller: GameActions }) {
   return (
     <main id="main-content" class="screen after-action-screen" data-screen="after_action">
       <header class="report-hero">
@@ -25,6 +25,7 @@ export function AfterActionScreen({ report, controller }: { readonly report: Rep
           <div><dt>Final date</dt><dd>{report.finalDate}</dd></div>
           <div><dt>Elapsed</dt><dd>{report.elapsedDays} committed days</dd></div>
           <div><dt>Objective</dt><dd>{report.objectiveStatus}</dd></div>
+          <div><dt>Campaign save</dt><dd><span class="save-dot" aria-hidden="true" />Saved · {autosaveBoundary}</dd></div>
         </dl>
       </header>
 
