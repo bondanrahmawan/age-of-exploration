@@ -2615,12 +2615,15 @@ function applyJourneyAction(
     }, `Ten ducats purchase one uncertain Cape Verde rumour at confidence 25: ${fact.claim}`);
   }
   if (command.type === "recognise_cape_landfall") {
+    const capeLandfallIsVisible = state.navigation.lastLandfall.kind === "visible_unrecognised"
+      && state.navigation.lastLandfall.knownFactId === LANDMARK_IDS.capeGoal;
+    const capeLandfallIsAlreadyRecognised = state.navigation.lastLandfall.kind === "recognised"
+      && state.navigation.lastLandfall.landmarkId === LANDMARK_IDS.capeGoal;
     if (
       state.journey.location !== "at_sea"
-      || state.navigation.lastLandfall.kind !== "visible_unrecognised"
-      || state.navigation.lastLandfall.knownFactId !== LANDMARK_IDS.capeGoal
+      || (!capeLandfallIsVisible && !capeLandfallIsAlreadyRecognised)
     ) {
-      throw new SimulationValidationError("Cape recognition requires a true-position visible Cape landfall");
+      throw new SimulationValidationError("Cape recognition requires a true-position visible or recognised Cape landfall");
     }
     const cape = LANDMARKS.find((landmark) => landmark.id === LANDMARK_IDS.capeGoal)!;
     const knowledge = state.navigation.knowledge.map((fact) => fact.id === LANDMARK_IDS.capeGoal

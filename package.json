@@ -2,7 +2,7 @@
   "name": "@age-of-exploration/simulation",
   "version": "0.0.0",
   "private": true,
-  "description": "Deterministic headless simulation foundation for Age of Exploration",
+  "description": "Deterministic Age of Exploration simulation and local browser game",
   "type": "module",
   "engines": {
     "node": ">=22 <23"
@@ -19,19 +19,32 @@
     "docs/technical-plan.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "chart:wp1": "pnpm build && node scripts/generate-wp1-chart.mjs",
-    "event:validate": "pnpm build && node scripts/validate-event-catalogue.mjs",
-    "fixture:wp3": "pnpm build && node scripts/generate-wp3-fixture.mjs",
-    "fixture:wp4": "pnpm build && node scripts/generate-wp4-fixture.mjs",
+    "dev": "vite",
+    "build": "pnpm build:engine && pnpm build:app",
+    "build:engine": "tsc -p tsconfig.build.json",
+    "build:app": "vite build",
+    "chart:wp1": "pnpm build:engine && node scripts/generate-wp1-chart.mjs",
+    "event:validate": "pnpm build:engine && node scripts/validate-event-catalogue.mjs",
+    "fixture:wp3": "pnpm build:engine && node scripts/generate-wp3-fixture.mjs",
+    "fixture:wp4": "pnpm build:engine && node scripts/generate-wp4-fixture.mjs",
     "test:campaign": "vitest run test/campaign.test.ts test/campaign-determinism.test.ts --reporter=verbose",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:ui": "vitest run test/ui-controller.test.ts test/ui-components.test.tsx --reporter=verbose",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.app.json --noEmit",
     "test": "vitest run",
     "test:determinism": "vitest run test/determinism.test.ts test/navigation-determinism.test.ts test/survival-determinism.test.ts test/journey-determinism.test.ts test/campaign-determinism.test.ts --reporter=verbose"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@preact/preset-vite": "2.10.6",
+    "@testing-library/preact": "3.2.4",
     "@types/node": "^22.0.0",
+    "happy-dom": "20.11.6",
     "typescript": "5.9.3",
+    "vite": "7.3.6",
     "vitest": "3.2.4"
+  },
+  "dependencies": {
+    "preact": "10.29.8"
   }
 }

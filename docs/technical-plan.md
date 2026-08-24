@@ -1,4 +1,4 @@
-# WP0 Technical Plan
+# Base-Game Technical Plan
 
 `docs/game-design.md` is the repository's development contract. Section 34 wins
 over broader prose. This document records the preserved WP0 foundation. WP1's
@@ -6,7 +6,9 @@ versioned extension and authored tuning are recorded separately in
 `docs/wp1-navigation.md`; WP2's versioned survival extension is recorded in
 `docs/wp2-survival.md`. WP3's released journey is recorded in
 `docs/wp3-authored-journey.md`, and the separate WP4 campaign wrapper is
-recorded in `docs/wp4-knowledge-campaign.md`. WP5 is the next gate.
+recorded in `docs/wp4-knowledge-campaign.md`. The WP5 browser product layer and
+acceptance evidence are recorded in `docs/wp5-player-facing-base-game.md` and
+`docs/wp5-acceptance.md`.
 
 ## Runtime and boundaries
 
@@ -19,6 +21,24 @@ recorded in `docs/wp4-knowledge-campaign.md`. WP5 is the next gate.
   persisted in or exposed by the player view.
 - The public player projection is an allow-list. It excludes the seed, PRNG
   state, true position, environment truth, and replay inputs.
+
+## WP5 browser product boundary
+
+- Preact 10 and Vite 7 provide the local browser application; Playwright covers
+  real Chromium interaction. There is no runtime server, database, account,
+  telemetry, remote asset, or cloud-save dependency.
+- `app/controller.ts` alone holds authoritative campaign state. It forwards
+  ordinary commands through the WP4 wrapper and autosaves only successful
+  committed commands with the existing campaign serializer.
+- UI components consume screen-specific allow-listed models created from
+  `CampaignPlayerView`. Active components never receive actual position/route,
+  hidden traces, raw saves, seeds/PRNG state, unknown-current geometry, hidden
+  event data, or undiscovered landmark geometry.
+- Campaign saves and UI-only animation/panel preferences use separate local
+  storage records. Invalid campaign bytes are retained and reported.
+- Exactly four product screens are implemented: Outfitting, Expedition,
+  Interrupt, and After-action report. Actual-route comparison exists only in
+  the finalized report model.
 
 ## Canonical integer units
 
