@@ -6,6 +6,37 @@ export {
 } from "./errors.js";
 export { canonicalize, hashCanonical, sha256Hex } from "./canonical.js";
 export {
+  assertCampaignCommand,
+  assertCampaignFact,
+  assertCampaignState,
+  campaignFactsToNavigationFacts,
+  canonicalCampaignState,
+  createCampaign,
+  createCampaignFixtureState,
+  createCampaignReplay,
+  createStartingCampaignFacts,
+  deserializeCampaignSave,
+  executeCampaignCommand,
+  executeForwardedSimulationCommand,
+  getCampaignPlayerView,
+  hashAfterActionReport,
+  hashCampaignCommandLog,
+  hashCampaignFacts,
+  hashCampaignState,
+  journeyFactToCampaignFact,
+  mergeCampaignFacts,
+  replayCampaign,
+  serializeCampaignSave,
+} from "./campaign.js";
+export {
+  AFTER_ACTION_REPORT_FORMAT,
+  CAMPAIGN_FACT_TYPES,
+  CAMPAIGN_OUTCOME_IDS,
+  CAMPAIGN_REPLAY_FORMAT,
+  CAMPAIGN_SAVE_FORMAT,
+  CAMPAIGN_STATE_FORMAT,
+} from "./campaign-types.js";
+export {
   advanceDay,
   advanceUntilInterrupted,
   applyCommand,
@@ -31,6 +62,33 @@ export {
   validateEventCatalogue,
 } from "./events.js";
 export type { EventCatalogueStats, EventSelectionResult, WeightedEvent } from "./events.js";
+export type {
+  ActiveExpedition,
+  AfterActionReport,
+  CampaignClaimedValue,
+  CampaignCommand,
+  CampaignCommandResult,
+  CampaignExecutionOptions,
+  CampaignFact,
+  CampaignFactChange,
+  CampaignFactEvidence,
+  CampaignFactType,
+  CampaignFixtureConfig,
+  CampaignInitialConfig,
+  CampaignLogEntry,
+  CampaignOutcomeId,
+  CampaignPlayerView,
+  CampaignReplayRecord,
+  CampaignReportSnapshot,
+  CampaignRunSummary,
+  CampaignSaveEnvelope,
+  CampaignState,
+  CurrentContributionHistoryPoint,
+  ExpeditionMetrics,
+  HiddenAfterActionTracePoint,
+  TrackPosition,
+  UncertaintyHistoryPoint,
+} from "./campaign-types.js";
 export {
   authoredAtlanticEnvironment,
   fairWeatherStillWaterEnvironment,

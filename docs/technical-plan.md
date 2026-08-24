@@ -4,7 +4,9 @@
 over broader prose. This document records the preserved WP0 foundation. WP1's
 versioned extension and authored tuning are recorded separately in
 `docs/wp1-navigation.md`; WP2's versioned survival extension is recorded in
-`docs/wp2-survival.md`. WP3 is the next gate.
+`docs/wp2-survival.md`. WP3's released journey is recorded in
+`docs/wp3-authored-journey.md`, and the separate WP4 campaign wrapper is
+recorded in `docs/wp4-knowledge-campaign.md`. WP5 is the next gate.
 
 ## Runtime and boundaries
 
