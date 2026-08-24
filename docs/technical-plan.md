@@ -25,8 +25,16 @@ acceptance evidence are recorded in `docs/wp5-player-facing-base-game.md` and
 ## WP5 browser product boundary
 
 - Preact 10 and Vite 7 provide the local browser application; Playwright covers
-  real Chromium interaction. There is no runtime server, database, account,
-  telemetry, remote asset, or cloud-save dependency.
+  real Chromium interaction. The Windows launcher owns a loopback-only static
+  server for the built files, with no gameplay API or authoritative state.
+  There is no remote server, database, account, telemetry, remote asset, or
+  cloud-save dependency.
+- `play.cmd` is the single Windows player action. `scripts/play.mjs` validates
+  Node and pinned pnpm, refreshes dependencies and production output only when
+  their hashes change, refuses foreign or stale port occupants, verifies the
+  production bundle excludes E2E-only markers, and then opens the fixed
+  save-preserving origin. Its health projection contains no campaign state or
+  hidden truth.
 - `app/controller.ts` alone holds authoritative campaign state. It forwards
   ordinary commands through the WP4 wrapper and autosaves only successful
   committed commands with the existing campaign serializer.

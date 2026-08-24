@@ -7,12 +7,14 @@ campaign and does not add any deferred full-game system.
 ## Technology decision and package layout
 
 The application uses Preact 10 and Vite 7 with TypeScript. Preact supplies the
-small component/runtime layer; Vite supplies a maintained Node-22-compatible
-development and production build without introducing a server at runtime.
-Vitest 3 remains the established unit test runner, and Playwright provides the
-real Chromium interaction path. Vite 7 is deliberately retained alongside the
-validated Vitest 3 dependency instead of migrating the engine test toolchain to
-Vite 8.
+small component/runtime layer, and Vite supplies the maintained
+Node-22-compatible development and production build. The one-step Windows
+launcher serves only that production output through a first-party,
+loopback-only Node static server; it adds no API, remote service, or
+authoritative game-state owner. Vitest 3 remains the established unit test
+runner, and Playwright provides the real Chromium interaction path. Vite 7 is
+deliberately retained alongside the validated Vitest 3 dependency instead of
+migrating the engine test toolchain to Vite 8.
 
 ```text
 src/                         pure deterministic engine and campaign wrapper
@@ -22,12 +24,18 @@ app/storage.ts               campaign-save and separate preference adapters
 app/seed.ts                  injectable expedition seed ownership
 app/components/              four product-screen presentations
 app/e2e-environment.ts       e2e-mode-only short deterministic route
+play.cmd                     one-step Windows player entrypoint
+scripts/play.mjs             build identity and loopback static-server owner
+scripts/play.test.mjs        launcher identity, serving, and freshness tests
 test/ui-*.test.*             controller, projection, component, a11y tests
 e2e/player-flow.spec.ts      real-browser three-run and narrow-window paths
 ```
 
 `pnpm build:engine` preserves the headless package build. `pnpm build:app`
-produces the browser application. `pnpm build` composes both.
+produces the browser application. `pnpm build` composes both. The launcher
+hashes production inputs, reuses only an identified matching build, and writes
+its ignored build manifest under `app-dist/`. Its health response contains only
+the app id, launcher protocol, content version, and build id.
 
 ## Engine, controller, and projection boundary
 

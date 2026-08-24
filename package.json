@@ -31,7 +31,8 @@
     "test:ui": "vitest run test/ui-controller.test.ts test/ui-components.test.tsx --reporter=verbose",
     "test:e2e": "playwright test",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.app.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/play.test.mjs",
+    "test:launcher": "node --test scripts/play.test.mjs",
     "test:determinism": "vitest run test/determinism.test.ts test/navigation-determinism.test.ts test/survival-determinism.test.ts test/journey-determinism.test.ts test/campaign-determinism.test.ts --reporter=verbose"
   },
   "devDependencies": {
