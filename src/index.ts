@@ -58,6 +58,7 @@ export {
   choiceAvailability,
   dailyEventChancePermille,
   eligibleEventWeights,
+  eventText,
   presentEvent,
   selectDailyEvent,
   validateEventCatalogue,

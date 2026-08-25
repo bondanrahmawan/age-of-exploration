@@ -4,6 +4,7 @@ import {
   CAMPAIGN_STATE_FORMAT,
   LANDMARK_IDS,
   SOUTH_ATLANTIC_CURRENT_ID,
+  campaignFactsToNavigationFacts,
   canonicalCampaignState,
   createCampaign,
   createCampaignFixtureState,
@@ -41,17 +42,46 @@ function start(state: CampaignState, runSeed: string): CampaignState {
   return executeCampaignCommand(state, { type: "start_expedition", runSeed });
 }
 
-function outfitAndDepart(state: CampaignState): CampaignState {
+function outfitAndDepart(state: CampaignState, waterKg = 20_000): CampaignState {
   state = forward(state, {
     type: "set_lisbon_outfitting",
     allocation: {
-      waterKg: 20_000,
+      waterKg,
       provisionsKg: 12_000,
       repairStoresKg: 4_000,
       medicineKg: 1_000,
     },
   });
   return forward(state, { type: "depart_lisbon" });
+}
+
+function goToCapeAndRecognise(state: CampaignState): CampaignState {
+  state = forward(state, { type: "set_heading", heading: "SE" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+  state = forward(state, { type: "advance_day" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+  state = forward(state, { type: "recognise_cape_landfall" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+  expect(state.activeExpedition?.journey.journey.objectiveAchieved).toBe(true);
+  return state;
+}
+
+function surveyTheCape(state: CampaignState): CampaignState {
+  state = forward(state, { type: "survey_cape_day" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+  state = forward(state, { type: "survey_cape_day" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+  expect(state.activeExpedition?.journey.journey.surveyedLandmarkIds).toContain(LANDMARK_IDS.capeGoal);
+  return state;
+}
+
+/** The playtest ending: the Cape behind them, no port within reach, and the water gone. */
+function dieOnTheWayHome(state: CampaignState): CampaignState {
+  state = forward(state, { type: "leave_cape" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+  state = forward(state, { type: "set_heading", heading: "E" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+  for (let day = 0; day < 12 && state.activeExpedition!.journey.journey.outcome === null; day += 1) {
+    state = forward(state, { type: "advance_day" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+  }
+  expect(state.activeExpedition?.journey.survival.status).toMatchObject({
+    kind: "terminal",
+    reason: "crew_unable_to_continue",
+  });
+  return state;
 }
 
 function goToCapeVerde(state: CampaignState): CampaignState {
@@ -351,6 +381,133 @@ describe("WP4 campaign facts, report deposit, and outcomes", () => {
     state = executeCampaignCommand(state, { type: "deposit_report_at_cape_verde" });
     state = finalize(loseAtCapeVerde(state));
     expect(state.completedRuns[0]?.outcome).toBe("objective_failure");
+  });
+
+  it("salvages a completed landmark survey above evidence gathered at sea", () => {
+    const emptyCampaign = createCampaign({
+      contentVersion: CONTENT_VERSION,
+      expeditionDailyEventChancePermille: 0,
+    });
+    let state = outfitAndDepart(start(emptyCampaign, "surveyed-then-lost"), 0);
+    state = finalize(dieOnTheWayHome(surveyTheCape(goToCapeAndRecognise(state))));
+
+    const report = state.afterActionReports[0]!;
+    expect(report.outcome).toBe("objective_failure");
+    expect(report.objectiveStatus).toBe("achieved");
+    expect(report.reportSnapshotDay).toBeNull();
+    const salvaged = new Map(report.factsSalvagedFromLog.map((fact) => [fact.id, fact]));
+    // The survey tier lifts what the two days proved; a finding already under it is untouched.
+    expect(salvaged.get(LANDMARK_IDS.capeGoal)?.confidence).toBe(65);
+    expect(salvaged.get("fact.cape-water-source")?.confidence).toBe(65);
+    expect(salvaged.get("fact.cape-hazard")?.confidence).toBe(60);
+    for (const fact of salvaged.values()) expect(fact.status).toBe("observed");
+  });
+
+  it("keeps a surveyed salvage short of the confidence that corrects the reckoning", () => {
+    const emptyCampaign = createCampaign({
+      contentVersion: CONTENT_VERSION,
+      expeditionDailyEventChancePermille: 0,
+    });
+    let state = outfitAndDepart(start(emptyCampaign, "survey-ceiling"), 0);
+    state = finalize(dieOnTheWayHome(surveyTheCape(goToCapeAndRecognise(state))));
+
+    expect(state.afterActionReports[0]?.factsSalvagedFromLog.every((fact) => fact.confidence < 70)).toBe(true);
+    const cape = state.facts.find((fact) => fact.id === LANDMARK_IDS.capeGoal)!;
+    expect(cape.confidence).toBeLessThan(70);
+    expect(cape.status).toBe("observed");
+    // The next crew inherits somewhere to steer for, and still has to recognise it by hand.
+    const inherited = campaignFactsToNavigationFacts(state.facts).find((fact) => fact.id === LANDMARK_IDS.capeGoal)!;
+    expect(inherited.status).not.toBe("confirmed");
+  });
+
+  it("earns the survey tier only for days actually spent on the landmark", () => {
+    const emptyCampaign = createCampaign({
+      contentVersion: CONTENT_VERSION,
+      expeditionDailyEventChancePermille: 0,
+    });
+    let state = goToCapeAndRecognise(outfitAndDepart(start(emptyCampaign, "survey-abandoned"), 0));
+    // One day begun and then given up completes nothing, so nothing is worth the survey tier.
+    state = forward(state, { type: "survey_cape_day" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+    state = finalize(dieOnTheWayHome(state));
+
+    const report = state.afterActionReports[0]!;
+    expect(report.objectiveStatus).toBe("achieved");
+    expect(report.factsSalvagedFromLog.map((fact) => fact.id)).toEqual([LANDMARK_IDS.capeGoal]);
+    expect(report.factsSalvagedFromLog[0]?.confidence).toBe(40);
+  });
+
+  it("leaves a loss with no recognised landmark at the ordinary salvage cap", () => {
+    const seen = { ...observedFact("fact.weed-and-birds"), confidence: 90, status: "confirmed" as const };
+    let state = createCampaignFixtureState({
+      contentVersion: CONTENT_VERSION,
+      runSeed: "no-landmark-salvage",
+      journey: { location: "cape_verde", hullBps: 0, dailyEventChancePermille: 0, facts: [seen] },
+    });
+    state = finalize(loseAtCapeVerde(state));
+    expect(state.afterActionReports[0]?.factsSalvagedFromLog.every((fact) => fact.confidence <= 40)).toBe(true);
+    expect(state.facts.find((fact) => fact.id === seen.id)?.confidence).toBe(40);
+  });
+
+  it("carries a surveyed Cape home stronger in a deposited report than in salvage", () => {
+    const surveyFinding = (state: CampaignState, id: string) =>
+      state.facts.find((fact) => fact.id === id)!.confidence;
+    const run = (deposit: boolean): CampaignState => {
+      const emptyCampaign = createCampaign({
+        contentVersion: CONTENT_VERSION,
+        expeditionDailyEventChancePermille: 0,
+      });
+      let state = outfitAndDepart(start(emptyCampaign, `survey-deposit-${String(deposit)}`), 0);
+      state = surveyTheCape(goToCapeAndRecognise(state));
+      if (deposit) {
+        state = forward(state, { type: "leave_cape" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+        state = forward(state, { type: "set_heading", heading: "NNW" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+        state = forward(state, { type: "advance_day" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+        state = forward(state, { type: "enter_cape_verde_port" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+        state = executeCampaignCommand(state, { type: "deposit_report_at_cape_verde" });
+        state = forward(state, { type: "leave_cape_verde_port" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+        state = forward(state, { type: "set_heading", heading: "E" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+        for (let day = 0; day < 12 && state.activeExpedition!.journey.journey.outcome === null; day += 1) {
+          state = forward(state, { type: "advance_day" }, CAMPAIGN_ROUTE_ENVIRONMENT);
+        }
+        return finalize(state);
+      }
+      return finalize(dieOnTheWayHome(state));
+    };
+    const deposited = run(true);
+    const salvaged = run(false);
+    expect(deposited.completedRuns[0]?.outcome).toBe("report_success");
+    expect(salvaged.completedRuns[0]?.outcome).toBe("objective_failure");
+    // The same two days of survey, banked ashore versus carried down with the crew.
+    expect(surveyFinding(deposited, "fact.cape-water-source")).toBe(70);
+    expect(surveyFinding(salvaged, "fact.cape-water-source")).toBe(65);
+    expect(deposited.facts.find((fact) => fact.id === LANDMARK_IDS.capeGoal)?.status).toBe("confirmed");
+    expect(salvaged.facts.find((fact) => fact.id === LANDMARK_IDS.capeGoal)?.status).toBe("observed");
+  });
+
+  it("creates report success when the crew, not the hull, is what is lost", () => {
+    let state = createCampaignFixtureState({
+      contentVersion: CONTENT_VERSION,
+      runSeed: "thirst-after-report",
+      journey: {
+        location: "cape_verde",
+        objectiveAchieved: true,
+        waterKg: 0,
+        healthBps: 300,
+        dailyEventChancePermille: 0,
+      },
+    });
+    state = executeCampaignCommand(state, { type: "deposit_report_at_cape_verde" });
+    for (let day = 0; day < 6 && state.activeExpedition!.journey.journey.outcome === null; day += 1) {
+      state = forward(state, { type: "careen_day_at_cape_verde" });
+    }
+    expect(state.activeExpedition?.journey.survival.status).toMatchObject({
+      kind: "terminal",
+      reason: "crew_unable_to_continue",
+    });
+    state = finalize(state);
+    // Thirst ends an expedition as surely as the hull does, and the report ashore says so.
+    expect(state.completedRuns[0]?.outcome).toBe("report_success");
+    expect(state.afterActionReports[0]?.objectiveStatus).toBe("achieved");
   });
 
   it("creates campaign-layer report success after a post-Cape deposit and later ship loss", () => {

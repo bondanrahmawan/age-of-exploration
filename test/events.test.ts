@@ -89,9 +89,11 @@ describe("WP3 authored event catalogue contract", () => {
       total: 24,
       byCategory: { weather: 5, stores: 4, ship: 4, crew: 7, navigation: 4 },
       delayed: 8,
-      remembered: 7,
-      preparationSoftened: 8,
+      remembered: 11,
+      preparationSoftened: 9,
       factProducing: 5,
+      accruesUnfinishedWork: 17,
+      clearsUnfinishedWork: 12,
     });
   });
 

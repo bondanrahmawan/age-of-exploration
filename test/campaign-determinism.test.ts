@@ -16,6 +16,7 @@ import {
   hashCampaignCommandLog,
   hashCampaignFacts,
   hashCampaignState,
+  LANDMARK_IDS,
   replayCampaign,
   serializeCampaignSave,
   serializeSave,
@@ -316,6 +317,42 @@ describe("WP4 campaign replay, projections, and compatibility", () => {
     expect(report.reportSnapshotHash).toBeNull();
     expect(report.factsSalvagedFromLog.length).toBeGreaterThan(0);
     expect(report.factsSalvagedFromLog.every((fact) => fact.confidence <= 40)).toBe(true);
+    const replayed = replayCampaign(starting, createCampaignReplay(starting, final.replayCommands), {
+      environmentProvider: CAMPAIGN_ROUTE_ENVIRONMENT,
+    });
+    expect(canonicalCampaignState(replayed)).toBe(canonicalCampaignState(final));
+    expect(hashCampaignFacts(replayed)).toBe(hashCampaignFacts(final));
+  });
+
+  it("replays a surveyed Cape lost on the way home, at the survey salvage tier, byte-for-byte", () => {
+    const starting = createCampaign({
+      contentVersion: CONTENT_VERSION,
+      expeditionDailyEventChancePermille: 0,
+    });
+    const final = runCommands(starting, [
+      { type: "start_expedition", runSeed: "wp4-survey-salvage-replay" },
+      forwarded({ type: "set_lisbon_outfitting", allocation: { ...STANDARD_ALLOCATION, waterKg: 0 } }),
+      forwarded({ type: "depart_lisbon" }),
+      forwarded({ type: "set_heading", heading: "SE" }),
+      forwarded({ type: "advance_day" }),
+      forwarded({ type: "recognise_cape_landfall" }),
+      forwarded({ type: "survey_cape_day" }),
+      forwarded({ type: "survey_cape_day" }),
+      forwarded({ type: "leave_cape" }),
+      forwarded({ type: "set_heading", heading: "E" }),
+      forwarded({ type: "advance_day" }),
+      forwarded({ type: "advance_day" }),
+      { type: "finalize_expedition" },
+    ]);
+    const report = final.afterActionReports[0]!;
+    expect(report.outcome).toBe("objective_failure");
+    expect(report.objectiveStatus).toBe("achieved");
+    expect(report.reportSnapshotHash).toBeNull();
+    const salvaged = new Map(report.factsSalvagedFromLog.map((fact) => [fact.id, fact.confidence]));
+    expect(salvaged.get(LANDMARK_IDS.capeGoal)).toBe(65);
+    expect(salvaged.get("fact.cape-water-source")).toBe(65);
+    // The raised tier is still a cap, and still short of automatic navigation correction.
+    expect(report.factsSalvagedFromLog.every((fact) => fact.confidence < 70)).toBe(true);
     const replayed = replayCampaign(starting, createCampaignReplay(starting, final.replayCommands), {
       environmentProvider: CAMPAIGN_ROUTE_ENVIRONMENT,
     });

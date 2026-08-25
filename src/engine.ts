@@ -8,8 +8,10 @@ import {
   EVENT_TUNING,
   authoredEventById,
   choiceAvailability,
+  accruesBaselineUnfinishedWork,
   presentEvent,
   selectDailyEvent,
+  unfinishedWorkWear,
 } from "./events.js";
 import { deepFreeze } from "./immutable.js";
 import { createPrngState, nextIntegerInclusive } from "./prng.js";
@@ -542,6 +544,7 @@ function detachedState(state: Readonly<SimulationState>): SimulationState {
             lastEastWestObservation: { ...state.journey.lastEastWestObservation },
             facts: state.journey.facts.map(copyJourneyFact),
             flags: [...state.journey.flags],
+            unfinishedWork: state.journey.unfinishedWork,
             pendingEvent: state.journey.pendingEvent === null
               ? null
               : {
@@ -715,6 +718,7 @@ export function createJourneyState(
       lastEastWestObservation: { kind: "none" },
       facts: [],
       flags: [],
+      unfinishedWork: 0,
       pendingEvent: null,
       scheduledConsequences: [],
       eventHistory: [],
@@ -1557,6 +1561,7 @@ interface JourneyEffectState {
   readonly moneyDucats: number;
   readonly flags: readonly string[];
   readonly facts: readonly JourneyFact[];
+  readonly unfinishedWork: number;
   readonly expeditionIntent: SurvivalSimulationState["survival"]["expeditionIntent"];
   readonly terminalReason: "mutiny_seizure" | "authored_abandonment" | null;
 }
@@ -1644,6 +1649,11 @@ function applyJourneyEffects(
     ),
     flags,
     facts,
+    unfinishedWork: clampInteger(
+      prior.unfinishedWork + (eventEffects.unfinishedWorkDelta ?? 0),
+      0,
+      EVENT_TUNING.unfinishedWork.maximum,
+    ),
     expeditionIntent: eventEffects.abandonObjective === true
       ? "objective_abandoned"
       : prior.expeditionIntent,
@@ -1988,6 +1998,14 @@ function advanceSurvivalDay(
       foulingSpeedLossBps + SURVIVAL_TUNING.fouling.dailySpeedLossBps,
     );
   }
+  let unfinishedWork = state.format === JOURNEY_STATE_FORMAT ? state.journey.unfinishedWork : 0;
+  if (
+    state.format === JOURNEY_STATE_FORMAT
+    && state.survival.lifecycle === "underway"
+    && accruesBaselineUnfinishedWork(committedDay)
+  ) {
+    unfinishedWork = Math.min(unfinishedWork + 1, EVENT_TUNING.unfinishedWork.maximum);
+  }
   if (activity.kind === "repair") {
     stores = {
       ...stores,
@@ -1998,6 +2016,9 @@ function advanceSurvivalDay(
       activity.component,
       componentCondition(ship, activity.component) + activity.conditionRestoredBps,
     );
+    // A repair day is the standing way to work the backlog down without waiting
+    // for an event to offer the chance.
+    unfinishedWork = Math.max(0, unfinishedWork - 1);
   } else if (activity.kind === "port_rest") {
     moneyDucats -= activity.moneySpentDucats;
   } else if (activity.kind === "careening") {
@@ -2112,6 +2133,17 @@ function advanceSurvivalDay(
       CONDITION_MAX_BPS,
     );
   }
+  // Unfinished work is spent here, inside tick_ship_crew_health_and_morale, so a
+  // backlog that was never paid down keeps wearing the expedition every day rather
+  // than only at the moment a choice is made.
+  const wear = state.format === JOURNEY_STATE_FORMAT && state.survival.lifecycle === "underway"
+    ? unfinishedWorkWear(unfinishedWork)
+    : { crewHealthBps: 0, crewMoraleBps: 0, hullBps: 0 };
+  healthBps = clampInteger(healthBps + wear.crewHealthBps, 0, CONDITION_MAX_BPS);
+  moraleBps = clampInteger(moraleBps + wear.crewMoraleBps, 0, CONDITION_MAX_BPS);
+  if (wear.hullBps !== 0) {
+    ship = { ...ship, hullBps: clampInteger(ship.hullBps + wear.hullBps, 0, CONDITION_MAX_BPS) };
+  }
   let crew = { ...state.crew, healthBps, moraleBps };
   let journeyFlags = state.format === JOURNEY_STATE_FORMAT ? [...state.journey.flags] : [];
   let scheduledConsequences = state.format === JOURNEY_STATE_FORMAT
@@ -2133,6 +2165,7 @@ function advanceSurvivalDay(
         moneyDucats,
         flags: journeyFlags,
         facts: journeyFacts,
+        unfinishedWork,
         expeditionIntent,
         terminalReason: terminalEventReason,
       }, consequence.effects, date);
@@ -2143,6 +2176,7 @@ function advanceSurvivalDay(
       moneyDucats = applied.moneyDucats;
       journeyFlags = [...applied.flags];
       journeyFacts = applied.facts.map(copyJourneyFact);
+      unfinishedWork = applied.unfinishedWork;
       expeditionIntent = applied.expeditionIntent;
       terminalEventReason = applied.terminalReason;
       delayedLogs.push({
@@ -2289,6 +2323,7 @@ function advanceSurvivalDay(
         lastEastWestObservation,
         facts: journeyFacts,
         flags: journeyFlags,
+        unfinishedWork,
         pendingEvent: null,
         scheduledConsequences,
         outcome,
@@ -2351,6 +2386,8 @@ function advanceSurvivalDay(
       delayedConsequences: delayedLogs,
       activity,
       foulingSpeedLossBps,
+      unfinishedWork,
+      unfinishedWorkWear: { ...wear },
       warnings: warnings.map(copySurvivalWarning),
       status: copySurvivalStatus(status),
       interruption: copySurvivalInterrupt(survivalInterrupt),
@@ -2906,6 +2943,7 @@ function applyJourneyAction(
     moneyDucats: state.moneyDucats,
     flags: state.journey.flags,
     facts: state.journey.facts,
+    unfinishedWork: state.journey.unfinishedWork,
     expeditionIntent: state.survival.expeditionIntent,
     terminalReason: null,
   }, eventChoice.effects, state.date);
@@ -2994,6 +3032,7 @@ function applyJourneyAction(
       ...state.journey,
       flags: [...applied.flags],
       facts: applied.facts.map(copyJourneyFact),
+      unfinishedWork: applied.unfinishedWork,
       pendingEvent: null,
       scheduledConsequences: [
         ...state.journey.scheduledConsequences.map((item) => ({ ...item, effects: copyEventEffects(item.effects) })),
@@ -3270,6 +3309,7 @@ export function getPlayerView(state: Readonly<SimulationState>): PlayerView {
         observationDaysSpent: state.journey.observationDaysSpent,
         lastEastWestObservation: { ...state.journey.lastEastWestObservation },
         knownFacts: state.journey.facts.map(copyJourneyFact),
+        unfinishedWork: state.journey.unfinishedWork,
         pendingEvent: state.journey.pendingEvent === null
           ? null
           : {

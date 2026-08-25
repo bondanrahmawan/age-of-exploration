@@ -39,6 +39,7 @@ function DeckPanel({ model, controller }: { readonly model: ExpeditionViewModel;
         <article><span>Health</span><strong>{percent(deck.crew.healthBps)}</strong></article>
         <article><span>Morale</span><strong>{percent(deck.crew.moraleBps)}</strong></article>
         <article><span>Fouling</span><strong>{percent(deck.foulingSpeedLossBps)}</strong><small>speed lost to hull growth</small></article>
+        <article><span>Jobs outstanding</span><strong>{deck.unfinishedWork}</strong><small>{deck.unfinishedWorkNote}</small></article>
       </div>
       <h3>Ship components</h3>
       <div class="component-grid">

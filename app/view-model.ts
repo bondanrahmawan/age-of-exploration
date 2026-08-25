@@ -1,7 +1,9 @@
 import {
   AUTHORED_EVENTS,
   EAST_WEST_OBSERVATION_TIERS,
+  EVENT_TUNING,
   HEADINGS,
+  LANDMARK_IDS,
   SAILING_POLICIES,
   RATION_POLICIES,
   SHIP_COMPONENTS,
@@ -128,6 +130,8 @@ export interface DeckViewModel {
   readonly crew: JourneyPlayerView["crew"];
   readonly ship: JourneyPlayerView["ship"];
   readonly foulingSpeedLossBps: number;
+  readonly unfinishedWork: number;
+  readonly unfinishedWorkNote: string;
   readonly warnings: readonly string[];
   readonly observedWeather: string;
   readonly observedWind: string;
@@ -249,6 +253,8 @@ export interface ReportViewModel {
   readonly finalDate: string;
   readonly elapsedDays: number;
   readonly objectiveStatus: string;
+  readonly objectiveStatusNote: string;
+  readonly outcomeExplanation: string;
   readonly metrics: readonly ReportMetricViewModel[];
   readonly waterConsumedKg: number;
   readonly provisionsConsumedKg: number;
@@ -667,6 +673,8 @@ function buildExpedition(
       crew: { ...active.crew },
       ship: { ...active.ship },
       foulingSpeedLossBps: active.survival.foulingSpeedLossBps,
+      unfinishedWork: active.journey.unfinishedWork,
+      unfinishedWorkNote: unfinishedWorkNote(active.journey.unfinishedWork),
       warnings: active.survival.warnings.map((warning) => warning.message),
       observedWeather: titleCase(active.navigation.observedWeather),
       observedWind,
@@ -762,6 +770,23 @@ function canEnterCapeVerdeFrom(active: Readonly<JourneyPlayerView>): boolean {
  * still be repaired with the repair stores aboard, or a course decision that only the halt
  * screen puts in front of them.
  */
+/**
+ * Plain-language reading of the standing job list. The number itself means nothing to a
+ * player; what they need to know is whether it is costing them anything yet, and that a
+ * repair day is the way to work it down.
+ */
+function unfinishedWorkNote(unfinishedWork: number): string {
+  const tolerance = EVENT_TUNING.unfinishedWork.toleranceBeforeWear;
+  if (unfinishedWork <= tolerance) return "nothing the watch cannot keep up with";
+  if (unfinishedWork >= EVENT_TUNING.unfinishedWork.maximum) {
+    return "the ship is held together by promises; a repair day is overdue";
+  }
+  if (unfinishedWork >= EVENT_TUNING.unfinishedWork.pressureThreshold) {
+    return "wearing hull and crew daily; repair days work it down";
+  }
+  return "starting to tell on hull and crew";
+}
+
 function deckWarningHasResponse(active: Readonly<JourneyPlayerView>): boolean {
   const repairable = active.stores.repairStoresKg >= SURVIVAL_TUNING.repair.at_sea.repairStoresKg
     && SHIP_COMPONENTS.some((component) => shipComponentCondition(active.ship, component) < FULL_CONDITION_BPS);
@@ -945,6 +970,49 @@ function routeExplanationSummary(lines: readonly RouteExplanationViewModel[]): s
   return `No reported evidence explains the difference on any of the ${total} recorded ${total === 1 ? "day" : "days"}, day ${first.fromDay} to day ${last.toDay}.`;
 }
 
+/**
+ * The outcome and the objective status answer two different questions, and a voyage can
+ * answer them in opposite directions: the Cape found, the proof drowned. Neither field says
+ * so on its own, so the report states the connection outright instead of leaving the player
+ * to reconcile "Objective Failure" with "Achieved" four lines apart.
+ */
+function outcomeExplanation(report: Readonly<AfterActionReport>): string {
+  const deposit = report.reportSnapshotDay === null
+    ? null
+    : `A copy of the report was left at Cape Verde on day ${report.reportSnapshotDay}.`;
+  if (report.outcome === "full_success") {
+    return "The Cape was found and the ship carried the log home. Everything the crew wrote down now stands on the chart at the strength they recorded it.";
+  }
+  if (report.outcome === "report_success") {
+    return `The Cape was found and the expedition was not. ${deposit ?? "A copy of the report was already ashore at Cape Verde."} That copy came home in the crew's place, so the discovery stands at full strength even though nobody who made it did.`;
+  }
+  if (report.objectiveStatus === "abandoned") {
+    return report.outcome === "partial_return"
+      ? "The Cape was given up before it was ever sighted, and the ship turned for home. What the crew learned on the way out came back with them."
+      : "The Cape was given up before it was ever sighted, and the expedition did not come home either.";
+  }
+  if (report.outcome === "partial_return") {
+    return "The Cape was never sighted. The ship came home, so every finding the crew did make reached the chart at the strength they recorded it.";
+  }
+  if (report.objectiveStatus === "achieved") {
+    const cape = report.factsSalvagedFromLog.find((fact) => fact.id === LANDMARK_IDS.capeGoal);
+    const standing = cape === undefined
+      ? "Word of it reached Lisbon second-hand and at reduced confidence"
+      : `Word of it reached Lisbon second-hand and stands at ${cape.confidence}`;
+    return `The Cape was found and the proof did not survive. ${deposit === null ? "No copy of the report was ashore when the expedition ended, so nothing the crew wrote at the Cape came home in writing." : `${deposit} It was taken before the Cape, so it proves nothing about it.`} ${standing} — enough for the next voyage to steer by, never enough to call the Cape discovered.`;
+  }
+  return `The Cape was never sighted, and the expedition did not come home. ${deposit === null ? "Nothing the crew wrote came home in writing." : `${deposit} Only what that copy already held reached the chart at full strength.`} The rest is second-hand word at reduced confidence.`;
+}
+
+/** A short tie-in so the objective row cannot be read on its own as a contradiction. */
+function objectiveStatusNote(report: Readonly<AfterActionReport>): string {
+  if (report.objectiveStatus === "abandoned") return "turned back by choice";
+  if (report.objectiveStatus === "not_achieved") return "the Cape was never sighted";
+  if (report.outcome === "full_success") return "carried home by the ship";
+  if (report.outcome === "report_success") return "proved by the Cape Verde report";
+  return "found, but the proof was lost";
+}
+
 function buildReport(report: Readonly<AfterActionReport>): ReportViewModel {
   const currentExplanations = routeExplanations(report.currentContributionHistory);
   const salvagedIds = new Set(report.factsSalvagedFromLog.map((fact) => fact.id));
@@ -956,6 +1024,8 @@ function buildReport(report: Readonly<AfterActionReport>): ReportViewModel {
     finalDate: report.finalDate,
     elapsedDays: report.elapsedCommittedDays,
     objectiveStatus: titleCase(report.objectiveStatus),
+    objectiveStatusNote: objectiveStatusNote(report),
+    outcomeExplanation: outcomeExplanation(report),
     metrics: metrics(report),
     waterConsumedKg: report.waterConsumedKg,
     provisionsConsumedKg: report.provisionsConsumedKg,

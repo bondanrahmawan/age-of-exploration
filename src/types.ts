@@ -576,6 +576,8 @@ export interface EventEffects {
   readonly mastDeltaBps?: number;
   readonly sailsDeltaBps?: number;
   readonly rudderDeltaBps?: number;
+  /** Positive on a branch that defers the work, negative on one that finishes it. */
+  readonly unfinishedWorkDelta?: number;
   readonly setFlags?: readonly string[];
   readonly clearFlags?: readonly string[];
   readonly facts?: readonly JourneyFactEffect[];
@@ -614,6 +616,7 @@ export interface EventHardGates {
     readonly bps: number;
   };
   readonly minimumCommittedDay?: number;
+  readonly minimumUnfinishedWork?: number;
 }
 
 export interface EventWeightModifier {
@@ -624,13 +627,17 @@ export interface EventWeightModifier {
     | "low_morale"
     | "low_health"
     | "damaged_ship"
+    | "unfinished_work"
     | "prepared_flag";
   readonly addWeight: number;
   readonly flag?: string;
 }
 
 export interface RememberedEventText {
-  readonly requiredFlag: string;
+  /** Recalls a specific earlier decision. Omitted when the memory is a backlog, not a decision. */
+  readonly requiredFlag?: string;
+  /** Recalls the standing list of jobs put off. Both conditions must hold when both are given. */
+  readonly minimumUnfinishedWork?: number;
   readonly text: string;
 }
 
@@ -723,6 +730,8 @@ export interface JourneyState {
   readonly lastEastWestObservation: EastWestObservationResult;
   readonly facts: readonly JourneyFact[];
   readonly flags: readonly string[];
+  /** Jobs put off rather than done. Wears the ship and crew every day it stands above zero. */
+  readonly unfinishedWork: number;
   readonly pendingEvent: PendingChoiceEvent | null;
   readonly scheduledConsequences: readonly ScheduledConsequence[];
   readonly eventHistory: readonly EventHistoryEntry[];
@@ -763,6 +772,12 @@ export interface DelayedConsequenceLog {
   readonly text: string;
 }
 
+export interface UnfinishedWorkWearLog {
+  readonly crewHealthBps: number;
+  readonly crewMoraleBps: number;
+  readonly hullBps: number;
+}
+
 export interface JourneyDayLogEntry {
   readonly index: number;
   readonly type: "journey_day";
@@ -786,6 +801,8 @@ export interface JourneyDayLogEntry {
   readonly delayedConsequences: readonly DelayedConsequenceLog[];
   readonly activity: JourneyDayActivityResult;
   readonly foulingSpeedLossBps: number;
+  readonly unfinishedWork: number;
+  readonly unfinishedWorkWear: UnfinishedWorkWearLog;
   readonly warnings: readonly SurvivalWarning[];
   readonly status: SurvivalStatus;
   readonly interruption: SurvivalInterrupt;
@@ -1074,6 +1091,7 @@ export interface JourneyPlayerView extends PlayerViewBase {
     readonly observationDaysSpent: number;
     readonly lastEastWestObservation: EastWestObservationResult;
     readonly knownFacts: readonly JourneyFact[];
+    readonly unfinishedWork: number;
     readonly pendingEvent: PendingChoiceEvent | null;
     readonly outcome: RunOutcome | null;
   };

@@ -209,8 +209,8 @@ describe("WP3 state, pending-choice, save/resume, and replay determinism", () =>
     expect(canonicalize(first.canonicalLog)).toBe(canonicalize(second.canonicalLog));
     expect(hashState(first)).toBe(hashState(second));
     expect(hashEventLog(first)).toBe(hashEventLog(second));
-    expect(hashState(first)).toBe("b871fca57445a23a037df96fb270e558b5be9fe9961fcf7967a52ba15a0c8866");
-    expect(hashEventLog(first)).toBe("fbb2626f880cb8c5fb0e7217dd979e8cdffa44278acafdb44498142cc56bb843");
+    expect(hashState(first)).toBe("1c012d905b855d0011f8b634e78174feed05d2061899135d04e90eeabc884c47");
+    expect(hashEventLog(first)).toBe("5c42829bee29ea6d2bbe820451252f7efbeacd22eb433e5e9b329369a683377a");
   });
 
   it("saves and resumes exactly at a pending-choice boundary", () => {

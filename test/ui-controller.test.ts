@@ -249,10 +249,13 @@ describe("WP5 one-day campaign forwarding and pacing", () => {
 });
 
 describe("deck warnings that cannot be answered", () => {
-  it("sails past the spoilage warnings on a sound ship and leaves them standing in the briefing", async () => {
+  it("sails past the spoilage warnings with nothing to repair them with and leaves them standing in the briefing", async () => {
     const { controller } = harness();
     controller.beginNewCampaign();
-    controller.outfitAndDepart(VALID_ALLOCATION);
+    // No repair stores in the hold. Six weeks out the hull carries the wear of an
+    // unattended list of jobs, so the ship is no longer sound; what keeps the
+    // spoilage warning unanswerable is having nothing aboard to answer it with.
+    controller.outfitAndDepart({ ...VALID_ALLOCATION, repairStoresKg: 0 });
     controller.setAnimationMode("skipped");
 
     expect(await controller.advanceUntilInterrupted(60)).toBe(60);
@@ -384,6 +387,91 @@ function unexplainedRunReportController() {
   controller.resumeCampaign();
   return { controller, days: state.afterActionReports[0]!.elapsedCommittedDays };
 }
+
+/**
+ * The playtest ending: the Cape reached and surveyed on day two of the anchorage, then the
+ * water gone before any port. Its report is the one that reads "Objective Failure" over
+ * "Achieved", so the screen has to say how both are true at once.
+ */
+function surveyedCapeLostAtSeaController() {
+  let state = createCampaignFixtureState({
+    contentVersion: CONTENT_VERSION,
+    runSeed: "surveyed-cape-lost",
+    journey: {
+      location: "cape",
+      objectiveAchieved: true,
+      heading: "E",
+      waterKg: 0,
+      dailyEventChancePermille: 0,
+    },
+  });
+  const day = (command: Parameters<typeof executeForwardedSimulationCommand>[1]) => {
+    state = executeForwardedSimulationCommand(state, command, CAMPAIGN_ROUTE_ENVIRONMENT);
+  };
+  day({ type: "survey_cape_day" });
+  day({ type: "survey_cape_day" });
+  day({ type: "leave_cape" });
+  while (state.activeExpedition?.journey.journey.outcome === null) day({ type: "advance_day" });
+  state = executeCampaignCommand(state, { type: "finalize_expedition" });
+  const storage = new MemoryKeyValueStorage();
+  storage.setItem(CAMPAIGN_SAVE_KEY, serializeCampaignSave(state));
+  const controller = new GameController(
+    new CampaignSaveRepository(storage),
+    new PreferenceRepository(storage),
+    new FixedSeedSource(["unused"]),
+    { contentVersion: CONTENT_VERSION, dailyEventChancePermille: 0, environmentProvider: QUIET_TRANSIT_ENVIRONMENT },
+  );
+  controller.resumeCampaign();
+  return controller;
+}
+
+describe("after-action objective explanation", () => {
+  it("says outright that the Cape was found and the proof did not survive", () => {
+    const report = surveyedCapeLostAtSeaController().view().report!;
+
+    expect(report.outcome).toBe("Objective Failure");
+    expect(report.objectiveStatus).toBe("Achieved");
+    // The two fields disagree, so the screen states the relation rather than implying it.
+    expect(report.outcomeExplanation).toContain("The Cape was found and the proof did not survive");
+    expect(report.outcomeExplanation).toContain("enough for the next voyage to steer by");
+    expect(report.outcomeExplanation).toContain("never enough to call the Cape discovered");
+    expect(report.objectiveStatusNote).toBe("found, but the proof was lost");
+  });
+
+  it("credits the deposited copy when one carried the Cape home in the crew's place", () => {
+    let state = createCampaignFixtureState({
+      contentVersion: CONTENT_VERSION,
+      runSeed: "report-success-voice",
+      journey: {
+        location: "cape_verde",
+        objectiveAchieved: true,
+        waterKg: 0,
+        healthBps: 300,
+        dailyEventChancePermille: 0,
+      },
+    });
+    state = executeCampaignCommand(state, { type: "deposit_report_at_cape_verde" });
+    while (state.activeExpedition?.journey.journey.outcome === null) {
+      state = executeForwardedSimulationCommand(state, { type: "careen_day_at_cape_verde" }, NO_MOVEMENT_ENVIRONMENT);
+    }
+    state = executeCampaignCommand(state, { type: "finalize_expedition" });
+    const storage = new MemoryKeyValueStorage();
+    storage.setItem(CAMPAIGN_SAVE_KEY, serializeCampaignSave(state));
+    const controller = new GameController(
+      new CampaignSaveRepository(storage),
+      new PreferenceRepository(storage),
+      new FixedSeedSource(["unused"]),
+      { contentVersion: CONTENT_VERSION, dailyEventChancePermille: 0, environmentProvider: QUIET_TRANSIT_ENVIRONMENT },
+    );
+    controller.resumeCampaign();
+    const report = controller.view().report!;
+
+    expect(report.outcome).toBe("Report Success");
+    expect(report.outcomeExplanation).toContain("The Cape was found and the expedition was not");
+    expect(report.outcomeExplanation).toContain("came home in the crew's place");
+    expect(report.objectiveStatusNote).toBe("proved by the Cape Verde report");
+  });
+});
 
 describe("after-action evidence boundary", () => {
   it("collapses a run of unexplained days into one line with a range and a count", () => {

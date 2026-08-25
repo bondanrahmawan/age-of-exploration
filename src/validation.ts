@@ -1,5 +1,6 @@
 import { assertIsoDate, daysBetweenIsoDates } from "./date.js";
 import { SimulationValidationError } from "./errors.js";
+import { EVENT_TUNING } from "./events.js";
 import {
   SURVIVAL_TUNING,
   assertStoreCapsAndHold,
@@ -717,7 +718,7 @@ function assertJourneyState(value: unknown, date: string): void {
     "eventModel", "eventPrng", "dailyEventChancePermille", "location", "leg",
     "objectiveAchieved", "rumourPurchased", "capeSurveyDaysCompleted",
     "surveyedLandmarkIds", "capeWaterCollectedKg", "observationDaysSpent",
-    "lastEastWestObservation", "facts", "flags", "pendingEvent",
+    "lastEastWestObservation", "facts", "flags", "unfinishedWork", "pendingEvent",
     "scheduledConsequences", "eventHistory", "firedThisLeg", "outcome",
   ], "journey");
   if (value["eventModel"] !== "authored-journey-events-v1") {
@@ -733,6 +734,12 @@ function assertJourneyState(value: unknown, date: string): void {
   assertInteger(value["capeSurveyDaysCompleted"], "journey.capeSurveyDaysCompleted", 0, 1);
   assertInteger(value["capeWaterCollectedKg"], "journey.capeWaterCollectedKg", 0, 1_000_000_000);
   assertInteger(value["observationDaysSpent"], "journey.observationDaysSpent", 0, 1_000_000);
+  assertInteger(
+    value["unfinishedWork"],
+    "journey.unfinishedWork",
+    0,
+    EVENT_TUNING.unfinishedWork.maximum,
+  );
   assertEastWestObservation(value["lastEastWestObservation"], "journey.lastEastWestObservation");
   for (const key of ["surveyedLandmarkIds", "flags", "firedThisLeg"] as const) {
     if (!Array.isArray(value[key])) fail(`journey.${key} must be an array`);
@@ -1042,7 +1049,8 @@ function assertJourneyDayLog(value: UnknownRecord, label: string): void {
     "rationPolicy", "environmentId", "estimatedPosition", "uncertainty", "waterConsumedKg",
     "provisionsConsumedKg", "provisionsSpoiledKg", "observedWeather", "observedWind",
     "observation", "landfall", "event", "delayedConsequences", "activity",
-    "foulingSpeedLossBps", "warnings", "status", "interruption", "journeyLocation", "outcome",
+    "foulingSpeedLossBps", "unfinishedWork", "unfinishedWorkWear", "warnings", "status",
+    "interruption", "journeyLocation", "outcome",
   ], label);
   assertDayLogBase(value, label, true);
   assertInteger(value["provisionsSpoiledKg"], `${label}.provisionsSpoiledKg`, 0, ALLOCATABLE_HOLD_KG);
@@ -1070,6 +1078,16 @@ function assertJourneyDayLog(value: UnknownRecord, label: string): void {
   }
   assertJourneyDayActivity(value["activity"], `${label}.activity`);
   assertInteger(value["foulingSpeedLossBps"], `${label}.foulingSpeedLossBps`, 0, SURVIVAL_TUNING.fouling.maximumSpeedLossBps);
+  assertInteger(value["unfinishedWork"], `${label}.unfinishedWork`, 0, EVENT_TUNING.unfinishedWork.maximum);
+  assertRecord(value["unfinishedWorkWear"], `${label}.unfinishedWorkWear`);
+  assertExactKeys(
+    value["unfinishedWorkWear"],
+    ["crewHealthBps", "crewMoraleBps", "hullBps"],
+    `${label}.unfinishedWorkWear`,
+  );
+  for (const key of ["crewHealthBps", "crewMoraleBps", "hullBps"] as const) {
+    assertInteger(value["unfinishedWorkWear"][key], `${label}.unfinishedWorkWear.${key}`, -10_000, 0);
+  }
   assertSurvivalWarnings(value["warnings"], `${label}.warnings`);
   assertSurvivalStatus(value["status"], `${label}.status`);
   assertSurvivalInterrupt(value["interruption"], `${label}.interruption`);

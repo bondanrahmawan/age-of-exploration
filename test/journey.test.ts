@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AUTHORED_EVENTS,
   EAST_WEST_OBSERVATION_FLOOR_MNM,
+  EVENT_TUNING,
   EAST_WEST_OBSERVATION_TIERS,
   JOURNEY_STATE_FORMAT,
   LANDMARK_IDS,
@@ -12,6 +14,8 @@ import {
   createJourneyFixtureState,
   createJourneyState,
   eastWestObservationRefusal,
+  eligibleEventWeights,
+  eventText,
   getPlayerView,
   hashState,
   holdUsedKg,
@@ -515,4 +519,152 @@ describe("east-west observation days", () => {
     expect(observed.journey.outcome).toBeNull();
   });
 
+});
+
+describe("WP3 unfinished work carries a careful expedition towards the escalation gates", () => {
+  const TUNING = EVENT_TUNING.unfinishedWork;
+
+  function underway(seed: string, overrides: Record<string, unknown> = {}) {
+    const state = createJourneyFixtureState({
+      contentVersion: "wp3-journey-v1",
+      runSeed: seed,
+      location: "at_sea",
+      dailyEventChancePermille: 0,
+      waterKg: 24_000,
+      provisionsKg: 18_000,
+      repairStoresKg: 8_000,
+      medicineKg: 2_000,
+      ...overrides,
+    });
+    return applyCommand(state, { type: "set_heading", heading: "S" });
+  }
+
+  function sail(state: JourneySimulationState, days: number) {
+    let next = state;
+    for (let day = 0; day < days; day += 1) {
+      next = applyCommand(next, { type: "advance_day" });
+    }
+    return next;
+  }
+
+  it("gives every event an unconditional branch that is legal but never free", () => {
+    for (const event of AUTHORED_EVENTS) {
+      const unconditional = event.choices.filter((item) => {
+        const requirement = item.requirement;
+        return requirement.minimumMoneyDucats === undefined
+          && requirement.minimumWaterKg === undefined
+          && requirement.minimumProvisionsKg === undefined
+          && requirement.minimumRepairStoresKg === undefined
+          && requirement.minimumMedicineKg === undefined
+          && requirement.minimumMoraleBps === undefined
+          && (requirement.requiredFlags?.length ?? 0) === 0;
+      });
+      expect(unconditional.length).toBeGreaterThan(0);
+      for (const item of unconditional) {
+        const conditionSpent = -(
+          (item.effects.crewHealthDeltaBps ?? 0) + (item.effects.crewMoraleDeltaBps ?? 0)
+          + (item.effects.hullDeltaBps ?? 0) + (item.effects.mastDeltaBps ?? 0)
+          + (item.effects.sailsDeltaBps ?? 0) + (item.effects.rudderDeltaBps ?? 0)
+        );
+        const price = conditionSpent >= 200
+          || (item.effects.unfinishedWorkDelta ?? 0) !== 0
+          || (item.delayed?.length ?? 0) > 0
+          || item.effects.abandonObjective === true
+          || item.effects.terminalReason !== undefined
+          || (item.effects.waterDeltaKg ?? 0) < 0
+          || (item.effects.provisionsDeltaKg ?? 0) < 0
+          || (item.effects.repairStoresDeltaKg ?? 0) < 0
+          || (item.effects.medicineDeltaKg ?? 0) < 0;
+        expect(price, event.id + "." + item.id + " is unconditional and free").toBe(true);
+      }
+    }
+  });
+
+  it("accrues a job on its own account for every stretch of days at sea", () => {
+    const start = underway("baseline-accrual");
+    expect(start.journey.unfinishedWork).toBe(0);
+    expect(sail(start, TUNING.baselineAccrualDays - 1).journey.unfinishedWork).toBe(0);
+    expect(sail(start, TUNING.baselineAccrualDays).journey.unfinishedWork).toBe(1);
+    expect(sail(start, TUNING.baselineAccrualDays * 3).journey.unfinishedWork).toBe(3);
+  });
+
+  it("costs nothing while the list is short and wears crew and hull once it is not", () => {
+    const tolerated = sail(underway("within-tolerance"), TUNING.baselineAccrualDays * TUNING.toleranceBeforeWear);
+    expect(tolerated.journey.unfinishedWork).toBe(TUNING.toleranceBeforeWear);
+    expect(tolerated.crew.healthBps).toBe(10_000);
+    expect(tolerated.crew.moraleBps).toBe(7_500);
+    expect(tolerated.ship.hullBps).toBe(10_000);
+
+    const carrying = sail(tolerated, TUNING.baselineAccrualDays * 3);
+    expect(carrying.journey.unfinishedWork).toBe(TUNING.toleranceBeforeWear + 3);
+    expect(carrying.crew.healthBps).toBeLessThan(10_000);
+    expect(carrying.crew.moraleBps).toBeLessThan(7_500);
+    expect(carrying.ship.hullBps).toBeLessThan(10_000);
+  });
+
+  it("lets a repair day work the list down at the standing cost of a day and stores", () => {
+    const carrying = sail(underway("repair-clears"), TUNING.baselineAccrualDays * 4);
+    expect(carrying.journey.unfinishedWork).toBe(4);
+    const repaired = applyCommand(carrying, { type: "repair_day", component: "hull", location: "at_sea" });
+    expect(repaired.journey.unfinishedWork).toBe(3);
+    expect(repaired.stores.repairStoresKg).toBeLessThan(carrying.stores.repairStoresKg);
+  });
+
+  it("never carries more than the authored maximum", () => {
+    const saturated = sail(underway("saturated"), TUNING.baselineAccrualDays * (TUNING.maximum + 4));
+    expect(saturated.journey.unfinishedWork).toBe(TUNING.maximum);
+  });
+
+  it("opens the escalation gates a sound ship on a flat voyage can never reach", () => {
+    const gated = ["ship.hull-leak", "crew.fatigue", "crew.grumbling"];
+    const sound = underway("gates-shut");
+    const shutIds = eligibleEventWeights(sound).map((item) => item.event.id);
+    for (const id of gated) expect(shutIds).not.toContain(id);
+
+    const worn = underway("gates-open", {
+      healthBps: 8_400,
+      moraleBps: 4_400,
+      hullBps: 8_400,
+    });
+    const openIds = eligibleEventWeights(worn).map((item) => item.event.id);
+    for (const id of gated) expect(openIds).toContain(id);
+  });
+
+  it("weights the dangerous events up once the list is long, not only unlocking them", () => {
+    const overrides = { moraleBps: 4_400 };
+    const short = underway("weight-short", overrides);
+    const carrying = sail(
+      underway("weight-long", overrides),
+      TUNING.baselineAccrualDays * TUNING.pressureThreshold,
+    );
+    expect(carrying.journey.unfinishedWork).toBeGreaterThanOrEqual(TUNING.pressureThreshold);
+
+    const weightOf = (state: JourneySimulationState, id: string) =>
+      eligibleEventWeights(state).find((item) => item.event.id === id)?.weight ?? 0;
+    expect(weightOf(carrying, "crew.grumbling")).toBeGreaterThan(weightOf(short, "crew.grumbling"));
+  });
+
+  it("reads the standing list in remembered text the way it already reads preparation", () => {
+    const event = AUTHORED_EVENTS.find((item) => item.id === "ship.rudder-strain")!;
+    const short = underway("memory-short");
+    const carrying = sail(underway("memory-long"), TUNING.baselineAccrualDays * TUNING.pressureThreshold);
+    expect(eventText(short, event)).toBe(event.logText);
+    expect(eventText(carrying, event)).toContain("list of jobs");
+  });
+
+  it("leaves the preparation loop it sits beside exactly as it was", () => {
+    const spoiled = AUTHORED_EVENTS.find((item) => item.id === "stores.spoiled-provisions")!;
+    const unprepared = underway("preparation-intact");
+    expect(eventText(unprepared, spoiled)).toBe(spoiled.logText);
+
+    let prepared = unprepared;
+    const rats = AUTHORED_EVENTS.find((item) => item.id === "stores.rats")!;
+    expect(rats.choices.find((item) => item.id === "hunt-and-clean")!.effects.setFlags)
+      .toContain("stores_secured");
+    prepared = {
+      ...unprepared,
+      journey: { ...unprepared.journey, flags: ["stores_secured"] },
+    } as JourneySimulationState;
+    expect(eventText(prepared, spoiled)).toContain("earlier effort to secure the stores");
+  });
 });

@@ -19,12 +19,13 @@ export function AfterActionScreen({ report, autosaveBoundary, controller }: { re
           <p class="eyebrow">Finalized expedition {report.runNumber}</p>
           <h1>{report.outcome}</h1>
           <p class="lede">{report.reason}</p>
+          <p class="outcome-explanation">{report.outcomeExplanation}</p>
         </div>
         <dl class="report-dates">
           <div><dt>Departed</dt><dd>{report.departureDate}</dd></div>
           <div><dt>Ended</dt><dd>{report.finalDate}</dd></div>
           <div><dt>Days at sea</dt><dd>{report.elapsedDays}</dd></div>
-          <div><dt>Objective</dt><dd>{report.objectiveStatus}</dd></div>
+          <div><dt>Objective</dt><dd>{report.objectiveStatus}<small>{report.objectiveStatusNote}</small></dd></div>
           <div><dt>Campaign save</dt><dd><span class="save-dot" aria-hidden="true" />Saved · {autosaveBoundary}</dd></div>
         </dl>
       </header>

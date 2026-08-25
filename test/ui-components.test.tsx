@@ -249,6 +249,8 @@ describe("WP5 accessible product surfaces", () => {
       finalDate: "1488-10-05",
       elapsedDays: 187,
       objectiveStatus: "Not Achieved",
+      objectiveStatusNote: "the Cape was never sighted",
+      outcomeExplanation: "The Cape was never sighted. The ship came home, so every finding the crew did make reached the chart at the strength they recorded it.",
       metrics: [],
       waterConsumedKg: 1_000,
       provisionsConsumedKg: 1_000,
@@ -280,6 +282,43 @@ describe("WP5 accessible product surfaces", () => {
     expect(section.querySelectorAll("li")).toHaveLength(3);
     expect(within(section).getByText(/Day 27: reported evidence supports/)).toBeTruthy();
     expect(within(section).getByText("Days 28-187: route divergence unexplained (160 days).")).toBeTruthy();
+  });
+
+  it("explains a headline outcome that disagrees with the objective it reports", () => {
+    const report = {
+      runNumber: 2,
+      outcome: "Objective Failure",
+      reason: "The pooled crew is unable to continue the expedition.",
+      departureDate: "1488-04-01",
+      finalDate: "1488-10-05",
+      elapsedDays: 187,
+      objectiveStatus: "Achieved",
+      objectiveStatusNote: "found, but the proof was lost",
+      outcomeExplanation: "The Cape was found and the proof did not survive. No copy of the report was ashore when the expedition ended, so nothing the crew wrote at the Cape came home in writing. Word of it reached Lisbon second-hand and stands at 65 — enough for the next voyage to steer by, never enough to call the Cape discovered.",
+      metrics: [],
+      waterConsumedKg: 1_000,
+      provisionsConsumedKg: 1_000,
+      factsObserved: [],
+      factsReported: [],
+      factsDisproved: [],
+      factsLost: [],
+      factsSalvaged: [],
+      reportSnapshotDay: null,
+      estimatedTrack: [],
+      trueTrack: [],
+      uncertaintyHistory: [],
+      currentExplanations: [],
+      currentExplanationSummary: null,
+      observations: [],
+      inheritedDifferences: [],
+    } satisfies ReportViewModel;
+    const fake = { prepareNextExpedition: vi.fn() } as unknown as GameActions;
+    render(<AfterActionScreen report={report} autosaveBoundary="Between expeditions" controller={fake} />);
+
+    // "Objective Failure" and "Achieved" may not sit on one screen with nothing between them.
+    const hero = screen.getByRole("heading", { level: 1 }).closest("header")!;
+    expect(hero.textContent).toContain("The Cape was found and the proof did not survive");
+    expect(hero.textContent).toContain("found, but the proof was lost");
   });
 
   it("briefs Cape Verde as a working port, a report drop, and what carried ducats are for", () => {
