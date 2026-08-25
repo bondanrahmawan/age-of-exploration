@@ -89,7 +89,7 @@ const currentLoop = () => [
 ];
 
 const starting = createCampaign({
-  contentVersion: "wp4-knowledge-campaign-v1",
+  contentVersion: "wp4-knowledge-campaign-v2",
   expeditionDailyEventChancePermille: 0,
 });
 let state = starting;

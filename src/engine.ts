@@ -52,6 +52,7 @@ import {
   type EnvironmentContext,
   type EnvironmentProvider,
   type EventChoiceDefinition,
+  type EastWestObservationResult,
   type EventEffects,
   type Heading,
   type InitialStateConfig,
@@ -120,6 +121,7 @@ import {
   LANDMARKS,
   LANDMARK_IDS,
   createStartingNavigationKnowledge,
+  eastWestObservationTier,
   seasonForDate,
   windBandForPosition,
 } from "./world.js";
@@ -129,6 +131,7 @@ const DIRECTION_SCALE = 1_000_000;
 const NAVIGATOR_ERROR_PERMILLE = 800;
 const BASE_EAST_WEST_GROWTH_MNM = 12_000;
 const BASE_NORTH_SOUTH_GROWTH_MNM = 6_000;
+const FRUITLESS_OBSERVATION_MORALE_DELTA_BPS = -50;
 
 const HEADING_VECTORS: Readonly<Record<Heading, PositionMnm>> = {
   N: { xMnm: 0, yMnm: 1_000_000 },
@@ -349,9 +352,13 @@ function copyEventEffects(eventEffects: Readonly<EventEffects>): EventEffects {
 }
 
 function copyJourneyActivity(result: Readonly<JourneyDayActivityResult>): JourneyDayActivityResult {
-  return result.kind === "cape_survey"
-    ? { ...result, factsLearned: [...result.factsLearned] }
-    : { ...result };
+  if (result.kind === "cape_survey") {
+    return { ...result, factsLearned: [...result.factsLearned] };
+  }
+  if (result.kind === "east_west_observation") {
+    return { ...result, result: { ...result.result } };
+  }
+  return { ...result };
 }
 
 function copyOutcome(outcome: Readonly<JourneySimulationState["journey"]["outcome"]>) {
@@ -527,6 +534,8 @@ function detachedState(state: Readonly<SimulationState>): SimulationState {
             capeSurveyDaysCompleted: state.journey.capeSurveyDaysCompleted,
             surveyedLandmarkIds: [...state.journey.surveyedLandmarkIds],
             capeWaterCollectedKg: state.journey.capeWaterCollectedKg,
+            observationDaysSpent: state.journey.observationDaysSpent,
+            lastEastWestObservation: { ...state.journey.lastEastWestObservation },
             facts: state.journey.facts.map(copyJourneyFact),
             flags: [...state.journey.flags],
             pendingEvent: state.journey.pendingEvent === null
@@ -698,6 +707,8 @@ export function createJourneyState(
       capeSurveyDaysCompleted: 0,
       surveyedLandmarkIds: [],
       capeWaterCollectedKg: 0,
+      observationDaysSpent: 0,
+      lastEastWestObservation: { kind: "none" },
       facts: [],
       flags: [],
       pendingEvent: null,
@@ -952,8 +963,11 @@ function isNavigationEnvironment(
 function movementForDay(
   state: Readonly<SimulationState>,
   environment: Readonly<DailyEnvironment>,
+  commandedRun = true,
 ) {
-  const distanceMnm = nominalDistanceMnm(state, state.sailingPolicy, environment);
+  const distanceMnm = commandedRun
+    ? nominalDistanceMnm(state, state.sailingPolicy, environment)
+    : 0;
   const steeringDraw = nextIntegerInclusive(state.prng, -3_200, 3_200);
   const logDistanceDraw = nextIntegerInclusive(steeringDraw.state, -80_000, 80_000);
   const direction = HEADING_VECTORS[state.heading];
@@ -1082,6 +1096,51 @@ function resolveNavigationObservation(
     observation: { kind: "none" },
     estimatedPosition: { ...estimatedPosition },
     uncertainty: { ...uncertainty },
+  };
+}
+
+/**
+ * A deliberate east-west observation. The crew reads the lead, the water, and the birds
+ * against the authored shelf and reports a bracket rather than a position: the true
+ * longitude lies inside the returned radius of the corrected estimate, and that radius is
+ * the same figure already drawn on the chart, so the observation discloses nothing the
+ * player cannot already see. Open water returns nothing at all, which is why repeating
+ * the observation offshore never converges on a longitude the period could not measure.
+ */
+function resolveEastWestObservation(
+  truePosition: Readonly<PositionMnm>,
+  estimatedPosition: Readonly<PositionMnm>,
+  uncertainty: Readonly<UncertaintyRadiiMnm>,
+): {
+  readonly result: EastWestObservationResult;
+  readonly estimatedPosition: PositionMnm;
+  readonly uncertainty: UncertaintyRadiiMnm;
+} {
+  const tier = eastWestObservationTier(truePosition);
+  if (tier === null) {
+    return {
+      result: { kind: "open_ocean" },
+      estimatedPosition: { ...estimatedPosition },
+      uncertainty: { ...uncertainty },
+    };
+  }
+  const bracketMnm = tier.eastWestUncertaintyMnm;
+  return {
+    result: tier.kind === "shoaling_water"
+      ? { kind: "shoaling_water", eastWestUncertaintyMnm: 200_000 }
+      : { kind: "land_signs", eastWestUncertaintyMnm: 600_000 },
+    estimatedPosition: {
+      xMnm: clampInteger(
+        estimatedPosition.xMnm,
+        truePosition.xMnm - bracketMnm,
+        truePosition.xMnm + bracketMnm,
+      ),
+      yMnm: estimatedPosition.yMnm,
+    },
+    uncertainty: {
+      eastWestMnm: Math.min(uncertainty.eastWestMnm, bracketMnm),
+      northSouthMnm: uncertainty.northSouthMnm,
+    },
   };
 }
 
@@ -1564,7 +1623,7 @@ type SurvivalDayCommand = Extract<
 
 type JourneyDayCommand = Extract<
   SimulationCommand,
-  { readonly type: "survey_cape_day" | "collect_cape_water" }
+  { readonly type: "survey_cape_day" | "collect_cape_water" | "observation_day" }
 >;
 
 function validateSurvivalDayCommand(
@@ -1586,6 +1645,18 @@ function validateSurvivalDayCommand(
     }
     if (state.journey.surveyedLandmarkIds.includes(LANDMARK_IDS.capeGoal)) {
       throw new SimulationValidationError("the Cape landmark may be surveyed only once per expedition");
+    }
+    return;
+  }
+  if (command.type === "observation_day") {
+    if (state.format !== JOURNEY_STATE_FORMAT) {
+      throw new SimulationValidationError("an east-west observation requires the authored journey state");
+    }
+    if (state.survival.location !== "at_sea") {
+      throw new SimulationValidationError("an east-west observation is a sailing order and requires an at-sea location");
+    }
+    if (sailingCapabilityStatus(state.crew, state.ship).kind !== "active") {
+      throw new SimulationValidationError("an east-west observation requires a ship still able to work");
     }
     return;
   }
@@ -1734,6 +1805,50 @@ function advanceSurvivalDay(
     const completed = completedDays === SURVIVAL_TUNING.fouling.careeningDays;
     activity = { kind: "careening", completedDays, completed, foulingReset: completed };
     environmentId = "wp2-no-randomness-v1:cape-verde-careening";
+  } else if (command.type === "observation_day") {
+    const environment = resolveEnvironment(state, state.heading, state.sailingPolicy, provider);
+    if (!isNavigationEnvironment(environment)) {
+      throw new SimulationValidationError("an observation day requires a WP1 navigation daily environment");
+    }
+    const movement = movementForDay(state, environment, false);
+    const observed = resolveNavigationObservation(
+      environment,
+      movement.truePosition,
+      movement.estimatedPosition,
+      movement.uncertainty,
+    );
+    const eastWest = resolveEastWestObservation(
+      movement.truePosition,
+      observed.estimatedPosition,
+      observed.uncertainty,
+    );
+    const resolvedLandfall = resolveLandfall(
+      state,
+      environment,
+      movement.truePosition,
+      eastWest.estimatedPosition,
+      eastWest.uncertainty,
+    );
+    truePosition = movement.truePosition;
+    estimatedPosition = resolvedLandfall.estimatedPosition;
+    uncertainty = resolvedLandfall.uncertainty;
+    nextMovementPrng = movement.nextMovementPrng;
+    nextEnvironmentPrng = environment.nextEnvironmentPrng;
+    nextWeatherState = environment.nextWeatherState;
+    observedWeather = environment.observedWeather;
+    observedWind = { ...environment.observedWind };
+    observation = observed.observation;
+    landfall = resolvedLandfall.landfall;
+    navigationInterrupt = resolvedLandfall.interruption;
+    knowledge = resolvedLandfall.knowledge.map(copyFact);
+    environmentId = environment.id;
+    activity = {
+      kind: "east_west_observation",
+      result: eastWest.result,
+      eastWestUncertaintyBeforeMnm: observed.uncertainty.eastWestMnm,
+      eastWestUncertaintyAfterMnm: eastWest.uncertainty.eastWestMnm,
+      estimateCorrectionMnm: eastWest.estimatedPosition.xMnm - observed.estimatedPosition.xMnm,
+    };
   } else if (command.type === "survey_cape_day") {
     const completedDays = state.format === JOURNEY_STATE_FORMAT
       ? state.journey.capeSurveyDaysCompleted + 1
@@ -1782,6 +1897,12 @@ function advanceSurvivalDay(
   let capeWaterCollectedKg = state.format === JOURNEY_STATE_FORMAT
     ? state.journey.capeWaterCollectedKg
     : 0;
+  let observationDaysSpent = state.format === JOURNEY_STATE_FORMAT
+    ? state.journey.observationDaysSpent
+    : 0;
+  let lastEastWestObservation: EastWestObservationResult = state.format === JOURNEY_STATE_FORMAT
+    ? { ...state.journey.lastEastWestObservation }
+    : { kind: "none" };
   let journeyFacts = state.format === JOURNEY_STATE_FORMAT
     ? state.journey.facts.map(copyJourneyFact)
     : [];
@@ -1864,6 +1985,9 @@ function advanceSurvivalDay(
     stores = { ...stores, waterKg: stores.waterKg + collected };
     capeWaterCollectedKg += collected;
     activity = { kind: "cape_water_collection", waterCollectedKg: collected };
+  } else if (activity.kind === "east_west_observation") {
+    observationDaysSpent += 1;
+    lastEastWestObservation = { ...activity.result };
   }
 
   const hadZeroWaterWarning = warningIsActive(state.survival.warnings, "zero_water");
@@ -1905,6 +2029,13 @@ function advanceSurvivalDay(
       healthRestoredBps: healthBps - beforeHealth,
       moraleRestoredBps: moraleBps - beforeMorale,
     };
+  }
+  if (activity.kind === "east_west_observation" && activity.result.kind === "open_ocean") {
+    moraleBps = clampInteger(
+      moraleBps + FRUITLESS_OBSERVATION_MORALE_DELTA_BPS,
+      0,
+      CONDITION_MAX_BPS,
+    );
   }
   let crew = { ...state.crew, healthBps, moraleBps };
   let journeyFlags = state.format === JOURNEY_STATE_FORMAT ? [...state.journey.flags] : [];
@@ -1982,6 +2113,7 @@ function advanceSurvivalDay(
     let outcome = copyOutcome(state.journey.outcome);
     if (
       outcome === null
+      && command.type === "advance_day"
       && landfall.kind === "recognised"
       && landfall.landmarkId === LANDMARK_IDS.lisbon
       && state.survival.lifecycle === "underway"
@@ -2078,6 +2210,8 @@ function advanceSurvivalDay(
         capeSurveyDaysCompleted,
         surveyedLandmarkIds,
         capeWaterCollectedKg,
+        observationDaysSpent,
+        lastEastWestObservation,
         facts: journeyFacts,
         flags: journeyFlags,
         pendingEvent: null,
@@ -2854,7 +2988,11 @@ export function applyCommand(
     ) {
       return applyJourneyAction(state, command);
     }
-    if (command.type === "survey_cape_day" || command.type === "collect_cape_water") {
+    if (
+      command.type === "survey_cape_day"
+      || command.type === "collect_cape_water"
+      || command.type === "observation_day"
+    ) {
       return advanceSurvivalDay(
         state,
         command,
@@ -3054,6 +3192,8 @@ export function getPlayerView(state: Readonly<SimulationState>): PlayerView {
         capeSurveyDaysCompleted: state.journey.capeSurveyDaysCompleted,
         surveyedLandmarkIds: [...state.journey.surveyedLandmarkIds],
         capeWaterCollectedKg: state.journey.capeWaterCollectedKg,
+        observationDaysSpent: state.journey.observationDaysSpent,
+        lastEastWestObservation: { ...state.journey.lastEastWestObservation },
         knownFacts: state.journey.facts.map(copyJourneyFact),
         pendingEvent: state.journey.pendingEvent === null
           ? null

@@ -29,7 +29,7 @@ import {
   forward,
 } from "./campaign-test-helpers.js";
 
-const CONTENT_VERSION = "wp4-knowledge-campaign-v1";
+const CONTENT_VERSION = "wp4-knowledge-campaign-v2";
 
 function execute(
   state: CampaignState,

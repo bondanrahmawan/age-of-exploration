@@ -44,17 +44,17 @@ function boundaryFor(state: Readonly<CampaignState>): string {
   const active = view.activeRun;
   if (active === null) return "Between expeditions";
   if (active.journey.outcome !== null) return "Ready to finalize";
-  if (active.journey.pendingEvent !== null) return "Pending event decision";
-  if (view.depositedReport.deposited) return "Report deposited at Cape Verde";
+  if (active.journey.pendingEvent !== null) return "A decision is waiting";
+  if (view.depositedReport.deposited) return "Report left at Cape Verde";
   if (active.survival.lifecycle === "outfitting") return "Outfitting in Lisbon";
-  return `Day ${active.committedDay} boundary`;
+  return `Day ${active.committedDay} at sea`;
 }
 
 function previewFor(state: Readonly<CampaignState>): SafeSavePreview {
   const view = getCampaignPlayerView(state);
   return {
     kind: "valid",
-    message: "A compatible local campaign is available.",
+    message: "A saved campaign is waiting in this browser.",
     currentRunNumber: view.currentRunNumber,
     committedDay: view.activeRun?.committedDay ?? null,
     date: view.activeRun?.date ?? view.priorRunSummaries.at(-1)?.finalDate ?? null,
@@ -69,7 +69,7 @@ export class CampaignSaveRepository {
 
   public inspect(): SaveInspection {
     const raw = this.storage.getItem(CAMPAIGN_SAVE_KEY);
-    if (raw === null) return { kind: "none", preview: emptyPreview("none", "No local campaign is saved yet.") };
+    if (raw === null) return { kind: "none", preview: emptyPreview("none", "No campaign is saved in this browser yet.") };
     try {
       const state = deserializeCampaignSave(raw);
       return { kind: "valid", preview: previewFor(state), state };
@@ -78,7 +78,8 @@ export class CampaignSaveRepository {
         kind: "invalid",
         preview: emptyPreview(
           "invalid",
-          "The local campaign is invalid or incompatible. It has not been replaced; start fresh only if you intend to overwrite it.",
+          "This browser holds a saved campaign that this version of the game cannot read. Nothing has been "
+          + "deleted — the save is still there. Starting fresh will replace it for good.",
         ),
       };
     }

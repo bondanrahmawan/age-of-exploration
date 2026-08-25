@@ -1,6 +1,13 @@
 import type { FactViewModel } from "../view-model.js";
 
-export function FactList({ facts, emptyText = "No new facts are recorded." }: {
+const CONFIDENCE_WORDS: Record<string, string> = {
+  rumoured: "Rumoured",
+  observed: "Observed",
+  confirmed: "Confirmed",
+  disproved: "Disproved",
+};
+
+export function FactList({ facts, emptyText = "Nothing is recorded here yet." }: {
   readonly facts: readonly FactViewModel[];
   readonly emptyText?: string;
 }) {
@@ -12,7 +19,7 @@ export function FactList({ facts, emptyText = "No new facts are recorded." }: {
           <div class="fact-heading">
             <strong>{fact.label}</strong>
             <span class={`confidence confidence-${fact.status}`}>
-              {fact.status} · confidence {fact.confidence}%
+              {CONFIDENCE_WORDS[fact.status] ?? fact.status} · {fact.confidence}% sure
             </span>
           </div>
           <p>{fact.claim}</p>

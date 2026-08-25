@@ -153,6 +153,15 @@ export type CurrentContributionHistoryPoint =
       readonly explanation: "unexplained_route_divergence";
     };
 
+export interface ObservationHistoryPoint {
+  readonly day: number;
+  readonly date: string;
+  readonly result: "open_ocean" | "land_signs" | "shoaling_water";
+  readonly eastWestUncertaintyBeforeMnm: number;
+  readonly eastWestUncertaintyAfterMnm: number;
+  readonly estimateCorrectionMnm: number;
+}
+
 export interface AfterActionReport {
   readonly format: typeof AFTER_ACTION_REPORT_FORMAT;
   readonly runNumber: number;
@@ -179,6 +188,7 @@ export interface AfterActionReport {
   readonly trueTrack: readonly TrackPosition[];
   readonly uncertaintyHistory: readonly UncertaintyHistoryPoint[];
   readonly currentContributionHistory: readonly CurrentContributionHistoryPoint[];
+  readonly observationHistory: readonly ObservationHistoryPoint[];
 }
 
 export type CampaignCommand =

@@ -81,6 +81,42 @@ weight is clamped to at least one.
 Storm is an observed weather state only in WP1. It causes no surprise damage;
 storm events and consequences remain WP3.
 
+## The authored African shelf
+
+Section 34.4 adds one shelf: a polyline approximating the Atlantic coast of
+Africa, read only by the east-west observation below. It has no ports, no
+landmarks, no discoverable facts, and no landfall geometry, and it is never
+drawn on the player's chart. Its identity and its being a line rather than a
+set of points are **CONTRACT**; the vertices are **TUNING**.
+
+| Vertex | Position (nm) | Approximates |
+|---|---:|---|
+| 1 | (20, 145) | Portuguese coast north of Lisbon |
+| 2 | (135, -155) | Cadiz and the Strait approaches |
+| 3 | (75, -305) | Moroccan coast |
+| 4 | (-190, -650) | Cape Juby |
+| 5 | (-365, -1235) | Mauritanian coast |
+| 6 | (-445, -1440) | Cape Verde peninsula |
+| 7 | (-225, -1810) | Sierra Leone |
+| 8 | (80, -2060) | Cape Palmas |
+| 9 | (495, -1990) | Gold Coast |
+| 10 | (900, -2060) | Niger delta |
+| 11 | (1050, -2090) | Cameroon corner |
+| 12 | (1045, -2300) | Gabon |
+| 13 | (1295, -2850) | Angola |
+| 14 | (1405, -3700) | Namibia |
+| 15 | (1660, -4390) | the Cape |
+
+Distance to the shelf is the least distance from the true position to any of the
+fourteen segments, compared as exact squared `bigint` values. A point projecting
+inside a segment uses the squared cross product against the squared segment
+length, so no division or floating point enters the comparison and the tier a
+position falls in is identical on every machine.
+
+The Cape Verde landmark at (-770, -1430) lies about 325 nm off vertex 6, so the
+islands sit in the outer tier rather than the inner one. Lisbon and the Cape
+goal region both sit on the line.
+
 ## Observations, landfall, and hidden truth
 
 A usable noon sight corrects only the estimated north-south coordinate and its
@@ -88,6 +124,42 @@ uncertainty radius. East-west estimate and uncertainty remain untouched.
 Recognised confirmed landmarks correct the estimated position to the claimed
 chart position and set both uncertainty radii to the 5 nm base-game floor.
 Neither operation changes true position.
+
+An `observation_day` command spends a whole day on a deliberate east-west
+observation. It resolves like a sailing day with the commanded run forced to
+zero: it draws the same one weather transition and the same two movement values,
+applies current and leeway but no commanded distance, grows uncertainty, takes
+the noon sight, then resolves the east-west bracket, then checks landfall. It
+consumes no additional randomness, so adding it to a command sequence perturbs
+no existing stream ordering.
+
+| True distance to the shelf | Typed result | East-west radius | Estimate |
+|---|---|---:|---|
+| ≤ 300 nm | `shoaling_water` | capped at 200 nm | clamped into ±200 nm of truth |
+| ≤ 900 nm | `land_signs` | capped at 600 nm | clamped into ±600 nm of truth |
+| beyond | `open_ocean` | unchanged | unchanged |
+
+The clamp is `min`/`max` against the true east-west coordinate, so an estimate
+already inside the bracket does not move and an estimate outside it lands on the
+near edge. The correction therefore never moves the estimate onto the truth, and
+the cap is a `Math.min`, so the radius never widens. A fruitless observation costs the
+day, its stores, and 50 bps of crew morale.
+
+An observation day may recognise a landmark and take its fix, but it cannot
+complete the voyage: only a sailing day can arrive at Lisbon and resolve the
+run. Otherwise a ship that stopped to look while still inside Lisbon's sight
+radius would end its own expedition on the first day, having made no run to
+carry it clear.
+
+Repeating the observation offshore returns `open_ocean` forever. This is what
+keeps section 9.2 true: longitude stays unmeasurable at sea, and the band closes
+only as a coast approaches.
+
+The day writes an `east_west_observation` activity carrying the typed result,
+the east-west radius before and after, and the signed estimate correction, so
+both the ship's log and the after-action report can state why the band moved.
+The projection exposes the typed result and the two radii; it never exposes the
+shelf distance, the true position, or the shelf itself.
 
 Landfall uses squared `bigint` distance comparisons against true position.
 Visibility is physical radius plus the weather sight radius. A visible fact is

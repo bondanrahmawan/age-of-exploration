@@ -85,6 +85,7 @@ export type {
   CampaignState,
   CurrentContributionHistoryPoint,
   ExpeditionMetrics,
+  ObservationHistoryPoint,
   HiddenAfterActionTracePoint,
   TrackPosition,
   UncertaintyHistoryPoint,
@@ -148,14 +149,20 @@ export {
   WEATHER_KINDS,
 } from "./types.js";
 export {
+  AFRICAN_SHELF_ID,
+  AFRICAN_SHELF_VERTICES,
   ATLANTIC_WIND_FIELD,
+  EAST_WEST_OBSERVATION_TIERS,
   LANDMARK_IDS,
   LANDMARKS,
   SOUTH_ATLANTIC_CURRENT,
   SOUTH_ATLANTIC_CURRENT_ID,
   WEATHER_EFFECTS,
   createStartingNavigationKnowledge,
+  eastWestObservationTier,
+  withinShelfDistance,
 } from "./world.js";
+export type { EastWestObservationTier } from "./world.js";
 export type {
   AdvanceDayCommand,
   CapeVerdePortFixtureConfig,
@@ -166,6 +173,7 @@ export type {
   DelayedConsequenceSpec,
   DayLogEntry,
   DayPhase,
+  EastWestObservationResult,
   EnvironmentContext,
   EnvironmentProvider,
   EventCategory,
@@ -210,6 +218,7 @@ export type {
   NavigationPlayerView,
   NavigationSimulationState,
   NavigationState,
+  ObservationDayCommand,
   ObservationResult,
   ObservedWind,
   PlayerView,

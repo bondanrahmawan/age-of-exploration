@@ -50,7 +50,7 @@ function run(start: Readonly<SimulationState>, commands: readonly SimulationComm
 
 function journeyStart(): JourneySimulationState {
   return createJourneyState({
-    contentVersion: "wp3-authored-journey-v1",
+    contentVersion: "wp3-authored-journey-v2",
     runSeed: "wp3-representative-route",
     dailyEventChancePermille: 1_000,
   });
@@ -126,7 +126,7 @@ describe("WP3 state, pending-choice, save/resume, and replay determinism", () =>
     expect(canonicalize(first.canonicalLog)).toBe(canonicalize(second.canonicalLog));
     expect(hashState(first)).toBe(hashState(second));
     expect(hashEventLog(first)).toBe(hashEventLog(second));
-    expect(hashState(first)).toBe("03caed9796f4f2343e35bfc3e1766c9a4c1530d0409e4d02203feedae6b7b44b");
+    expect(hashState(first)).toBe("b871fca57445a23a037df96fb270e558b5be9fe9961fcf7967a52ba15a0c8866");
     expect(hashEventLog(first)).toBe("fbb2626f880cb8c5fb0e7217dd979e8cdffa44278acafdb44498142cc56bb843");
   });
 

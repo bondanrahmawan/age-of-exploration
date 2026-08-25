@@ -23,7 +23,7 @@ import {
   observedFact,
 } from "./campaign-test-helpers.js";
 
-const CONTENT_VERSION = "wp4-knowledge-campaign-v1";
+const CONTENT_VERSION = "wp4-knowledge-campaign-v2";
 
 function loseAtCapeVerde(state: CampaignState): CampaignState {
   state = forward(state, { type: "careen_day_at_cape_verde" });
@@ -468,4 +468,27 @@ describe("WP4 truth boundary, after-action data, and expedition inheritance", ()
     expect(() => executeCampaignCommand(state, { type: "deposit_report_at_cape_verde" })).toThrow("no expedition");
     expect(hashCampaignState(state)).toBe(before);
   });
+
+  it("records every east-west observation in the after-action report", () => {
+    let state = createCampaignFixtureState({
+      contentVersion: CONTENT_VERSION,
+      runSeed: "observation-history",
+      journey: {
+        location: "at_sea",
+        truePosition: { xMnm: 1_150_000, yMnm: -3_000_000 },
+        estimatedPosition: { xMnm: 250_000, yMnm: -3_000_000 },
+        waterKg: 0,
+        healthBps: 2_000,
+        dailyEventChancePermille: 0,
+      },
+    });
+    state = forward(state, { type: "observation_day" }, NO_MOVEMENT_ENVIRONMENT);
+    state = forward(state, { type: "advance_day" }, NO_MOVEMENT_ENVIRONMENT);
+    const report = finalize(state).afterActionReports[0]!;
+    expect(report.observationHistory).toHaveLength(1);
+    expect(report.observationHistory[0]?.result).toBe("shoaling_water");
+    expect(report.observationHistory[0]?.eastWestUncertaintyAfterMnm).toBeLessThanOrEqual(200_000);
+    expect(report.observationHistory[0]?.estimateCorrectionMnm).toBe(700_000);
+  });
+
 });

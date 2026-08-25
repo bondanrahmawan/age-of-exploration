@@ -250,6 +250,12 @@ export type ObservationResult =
   | { readonly kind: "heavy_swell_noon"; readonly northSouthUncertaintyMnm: 40_000 }
   | { readonly kind: "overcast_no_sight" };
 
+export type EastWestObservationResult =
+  | { readonly kind: "none" }
+  | { readonly kind: "open_ocean" }
+  | { readonly kind: "land_signs"; readonly eastWestUncertaintyMnm: 600_000 }
+  | { readonly kind: "shoaling_water"; readonly eastWestUncertaintyMnm: 200_000 };
+
 export type LandfallResult =
   | { readonly kind: "none" }
   | { readonly kind: "visible_unrecognised"; readonly knownFactId: string | null }
@@ -352,6 +358,10 @@ export interface CollectCapeWaterCommand {
   readonly type: "collect_cape_water";
 }
 
+export interface ObservationDayCommand {
+  readonly type: "observation_day";
+}
+
 export interface LeaveCapeCommand {
   readonly type: "leave_cape";
 }
@@ -367,6 +377,7 @@ export type JourneyOnlyCommand =
   | RecogniseCapeLandfallCommand
   | SurveyCapeDayCommand
   | CollectCapeWaterCommand
+  | ObservationDayCommand
   | LeaveCapeCommand
   | ChooseEventCommand;
 
@@ -708,6 +719,8 @@ export interface JourneyState {
   readonly capeSurveyDaysCompleted: number;
   readonly surveyedLandmarkIds: readonly string[];
   readonly capeWaterCollectedKg: number;
+  readonly observationDaysSpent: number;
+  readonly lastEastWestObservation: EastWestObservationResult;
   readonly facts: readonly JourneyFact[];
   readonly flags: readonly string[];
   readonly pendingEvent: PendingChoiceEvent | null;
@@ -728,6 +741,13 @@ export type JourneyDayActivityResult =
   | {
       readonly kind: "cape_water_collection";
       readonly waterCollectedKg: number;
+    }
+  | {
+      readonly kind: "east_west_observation";
+      readonly result: EastWestObservationResult;
+      readonly eastWestUncertaintyBeforeMnm: number;
+      readonly eastWestUncertaintyAfterMnm: number;
+      readonly estimateCorrectionMnm: number;
     };
 
 export interface EventPresentationLog {
@@ -1049,6 +1069,8 @@ export interface JourneyPlayerView extends PlayerViewBase {
     readonly capeSurveyDaysCompleted: number;
     readonly surveyedLandmarkIds: readonly string[];
     readonly capeWaterCollectedKg: number;
+    readonly observationDaysSpent: number;
+    readonly lastEastWestObservation: EastWestObservationResult;
     readonly knownFacts: readonly JourneyFact[];
     readonly pendingEvent: PendingChoiceEvent | null;
     readonly outcome: RunOutcome | null;

@@ -25,17 +25,17 @@ function SaveCard({ preview, controller }: { readonly preview: SafeSavePreview; 
         <p>{preview.message}</p>
         {preview.kind === "valid" && (
           <dl class="save-preview">
-            <div><dt>Boundary</dt><dd>{preview.boundary}</dd></div>
-            <div><dt>Date</dt><dd>{preview.date ?? "Between runs"}</dd></div>
-            <div><dt>Completed runs</dt><dd>{preview.completedRuns}</dd></div>
-            <div><dt>Reported facts</dt><dd>{preview.reportedFactCount}</dd></div>
+            <div><dt>Saved at</dt><dd>{preview.boundary}</dd></div>
+            <div><dt>Date aboard</dt><dd>{preview.date ?? "Between expeditions"}</dd></div>
+            <div><dt>Expeditions completed</dt><dd>{preview.completedRuns}</dd></div>
+            <div><dt>Facts on the chart</dt><dd>{preview.reportedFactCount}</dd></div>
           </dl>
         )}
       </div>
       <div class="button-row">
-        {preview.kind === "valid" && <button class="primary" type="button" onClick={() => controller.resumeCampaign()}>Resume saved campaign</button>}
+        {preview.kind === "valid" && <button class="primary" type="button" onClick={() => controller.resumeCampaign()}>Resume this campaign</button>}
         <button class={preview.kind === "valid" ? "secondary" : "primary"} type="button" onClick={() => controller.beginNewCampaign()}>
-          {preview.kind === "invalid" ? "Start fresh and overwrite invalid save" : preview.kind === "valid" ? "Begin new campaign and replace save" : "Begin new local campaign"}
+          {preview.kind === "invalid" ? "Start fresh and replace the unreadable save" : preview.kind === "valid" ? "Start a new campaign and replace this save" : "Start a new campaign"}
         </button>
       </div>
     </section>
@@ -61,7 +61,7 @@ export function OutfittingScreen({ model, preview, autosaveBoundary, controller 
         <div>
           <p class="eyebrow">Lisbon · 1 April 1488</p>
           <h1>Outfit and depart</h1>
-          <p class="lede"><strong>Mission:</strong> recognise the Cape region, then return the ship or a useful report to Lisbon. Confirm useful chart knowledge when the voyage permits.</p>
+          <p class="lede"><strong>Mission:</strong> find the Cape region, then bring the ship — or at least a useful report — home to Lisbon. Anything the crew confirms on the way stays on the chart for the next voyage.</p>
         </div>
         <p class="autosave-status"><span class="save-dot" aria-hidden="true" />Saved · {autosaveBoundary}</p>
       </header>
@@ -74,11 +74,11 @@ export function OutfittingScreen({ model, preview, autosaveBoundary, controller 
             <div class="section-heading">
               <div><p class="eyebrow">Hold plan</p><h2 id="allocation-title">Stores and range</h2></div>
             </div>
-            <div class="hold-meter" role="meter" aria-label="Allocatable hold used" aria-valuemin={0} aria-valuemax={52} aria-valuenow={Math.max(0, validation.allocatableHoldUsedKg / 1_000)}>
+            <div class="hold-meter" role="meter" aria-label="Hold space used" aria-valuemin={0} aria-valuemax={52} aria-valuenow={Math.max(0, validation.allocatableHoldUsedKg / 1_000)}>
               <span style={{ width: `${Math.min(100, Math.max(0, validation.allocatableHoldUsedKg / 520))}%` }} />
             </div>
             <p class="hold-caption">
-              {Math.max(0, validation.allocatableHoldUsedKg / 1_000).toFixed(1)} t allocated + 8.0 t fixed mission allocation = {Math.max(0, (validation.allocatableHoldUsedKg + 8_000) / 1_000).toFixed(1)} t of 60.0 t
+              {Math.max(0, validation.allocatableHoldUsedKg / 1_000).toFixed(1)} t of stores, plus 8.0 t the ship always carries — {Math.max(0, (validation.allocatableHoldUsedKg + 8_000) / 1_000).toFixed(1)} t of the 60.0 t hold
             </p>
             <div class="allocation-fields">
               {STORE_KINDS.map((store) => {
@@ -98,7 +98,7 @@ export function OutfittingScreen({ model, preview, autosaveBoundary, controller 
                       aria-invalid={validation.storeErrors[store] !== undefined}
                       onInput={(event) => setTonnes(store, event.currentTarget.value)}
                     />
-                    <small id={`${id}-help`}>Cap {(tuning.capKg / 1_000).toFixed(1)} t · {tuning.lisbonPriceDucatsPer1000Kg} ducats/t</small>
+                    <small id={`${id}-help`}>Up to {(tuning.capKg / 1_000).toFixed(1)} t · {tuning.lisbonPriceDucatsPer1000Kg} ducats a tonne</small>
                     <span id={`${id}-error`} class="field-error">{validation.storeErrors[store] ?? ""}</span>
                   </div>
                 );
@@ -106,43 +106,43 @@ export function OutfittingScreen({ model, preview, autosaveBoundary, controller 
             </div>
             <div class="allocation-summary">
               <dl>
-                <div><dt>Allocatable capacity</dt><dd>{(model.tuning.hold.allocatableKg / 1_000).toFixed(1)} t</dd></div>
-                <div><dt>Remaining capacity</dt><dd>{(validation.allocatableHoldRemainingKg / 1_000).toFixed(1)} t</dd></div>
+                <div><dt>Space you can fill</dt><dd>{(model.tuning.hold.allocatableKg / 1_000).toFixed(1)} t</dd></div>
+                <div><dt>Space left</dt><dd>{(validation.allocatableHoldRemainingKg / 1_000).toFixed(1)} t</dd></div>
                 <div><dt>Sponsor advance</dt><dd>{model.tuning.sponsorAdvanceDucats} ducats</dd></div>
-                <div><dt>Allocation cost</dt><dd>{validation.costDucats} ducats</dd></div>
-                <div><dt>Money carried</dt><dd>{validation.moneyRemainingDucats} ducats</dd></div>
+                <div><dt>Cost of these stores</dt><dd>{validation.costDucats} ducats</dd></div>
+                <div><dt>Ducats left to carry</dt><dd>{validation.moneyRemainingDucats} ducats</dd></div>
               </dl>
-              {validation.capacityError !== null && <p class="validation-error" role="alert">Capacity: {validation.capacityError}</p>}
-              {validation.moneyError !== null && <p class="validation-error" role="alert">Money: {validation.moneyError}</p>}
+              {validation.capacityError !== null && <p class="validation-error" role="alert">{validation.capacityError}</p>}
+              {validation.moneyError !== null && <p class="validation-error" role="alert">{validation.moneyError}</p>}
             </div>
             <div class="depart-band">
-              <p class="range-callout"><span>Projected-range estimate</span><strong>{validation.projectedRangeDays} days</strong><small>At 25 crew, before losses or spoilage</small></p>
+              <p class="range-callout"><span>Estimated range</span><strong>{validation.projectedRangeDays} days</strong><small>A guess for 25 crew before losses or spoilage. The sea will not match it exactly.</small></p>
               <div class="depart-commit">
                 <button class="primary depart-button" type="button" disabled={!validation.valid} onClick={() => controller.outfitAndDepart(allocation)}>
                   Depart Lisbon
                 </button>
-                {!validation.valid && <p class="disabled-reason">Departure remains disabled until every capacity, money, and stock error is corrected.</p>}
+                {!validation.valid && <p class="disabled-reason">Correct the errors above to depart.</p>}
               </div>
             </div>
           </section>
 
           <aside class="knowledge-column">
             <section class="panel" aria-labelledby="knowledge-title">
-              <p class="eyebrow">Inherited campaign knowledge</p>
+              <p class="eyebrow">Inherited knowledge</p>
               <h2 id="knowledge-title">What the chart claims</h2>
-              <FactList facts={model.inheritedFacts} />
+              <FactList facts={model.inheritedFacts} emptyText="The chart is blank. This first voyage sails on guesswork alone." />
             </section>
             <section class="panel" aria-labelledby="prior-runs-title">
-              <p class="eyebrow">Finalized reports</p>
+              <p class="eyebrow">Reports filed</p>
               <h2 id="prior-runs-title">Prior expeditions</h2>
-              {model.priorRuns.length === 0 ? <p class="empty-state">No expedition has yet returned a finalized account.</p> : (
+              {model.priorRuns.length === 0 ? <p class="empty-state">No expedition has come home yet.</p> : (
                 <ol class="run-list">
                   {model.priorRuns.map((run) => (
                     <li key={run.runNumber}>
                       <strong>Expedition {run.runNumber}: {run.outcome}</strong>
                       <span>{run.finalDate} · {run.elapsedDays} days</span>
                       <p>{run.reason}</p>
-                      <small>{run.reportedFactCount} facts reported · {run.lostFactCount} lost</small>
+                      <small>{run.reportedFactCount} facts reached the chart · {run.lostFactCount} lost with the ship</small>
                     </li>
                   ))}
                 </ol>

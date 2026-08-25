@@ -15,10 +15,13 @@ import {
   type EventEffects,
   type EventChoiceRequirement,
   type Heading,
+  type JourneyDayActivityResult,
+  type ObservationHistoryPoint,
   type JourneyPlayerView,
   type RationPolicy,
   type SailingPolicy,
   type StoreKind,
+  type SurvivalActionResult,
   type StoresState,
 } from "../src/index.js";
 
@@ -130,6 +133,9 @@ export interface DeckViewModel {
   readonly rationPolicy: RationPolicy;
   readonly expeditionIntent: string;
   readonly expeditionIntentValue: JourneyPlayerView["survival"]["expeditionIntent"];
+  readonly observationDaysSpent: number;
+  readonly lastObservation: string;
+  readonly observationReason: string | null;
 }
 
 export interface LogEntryViewModel {
@@ -197,6 +203,21 @@ export interface InterruptViewModel {
   readonly eventId: string | null;
 }
 
+/**
+ * One line of the route-divergence section. Days the reported evidence explains keep a
+ * line each; days it does not are collapsed into one line per unbroken run, because a
+ * long voyage produces hundreds of them and one line per day reads as debug output.
+ */
+export type RouteExplanationViewModel =
+  | { readonly kind: "supported"; readonly day: number; readonly text: string }
+  | {
+      readonly kind: "unexplained";
+      readonly fromDay: number;
+      readonly toDay: number;
+      readonly dayCount: number;
+      readonly text: string;
+    };
+
 export interface ReportMetricViewModel {
   readonly label: string;
   readonly starting: string;
@@ -228,7 +249,9 @@ export interface ReportViewModel {
     readonly errorEastWestNm: number;
     readonly errorNorthSouthNm: number;
   }[];
-  readonly currentExplanations: readonly string[];
+  readonly currentExplanations: readonly RouteExplanationViewModel[];
+  readonly currentExplanationSummary: string | null;
+  readonly observations: readonly { readonly day: number; readonly text: string }[];
   readonly inheritedDifferences: readonly FactViewModel[];
 }
 
@@ -288,19 +311,19 @@ export function validateOutfitting(allocation: Readonly<StoresState>): Outfittin
     const quantity = allocation[key];
     const cap = SURVIVAL_TUNING.stores[store].capKg;
     if (!Number.isSafeInteger(quantity) || quantity < 0) {
-      storeErrors[store] = "Enter a non-negative quantity in whole kilograms.";
+      storeErrors[store] = "Enter 0 or more tonnes, in steps of 0.5.";
     } else if (quantity > cap) {
-      storeErrors[store] = `Lisbon stock and ship cap: ${(cap / 1_000).toFixed(1)} t.`;
+      storeErrors[store] = `${(cap / 1_000).toFixed(1)} t is the most Lisbon can supply.`;
     }
   }
   const allocatableHoldUsedKg = Object.values(allocation).reduce((total, quantity) => total + quantity, 0);
   const capacityError = allocatableHoldUsedKg > SURVIVAL_TUNING.hold.allocatableKg
-    ? `Allocation exceeds the 52.0 t available hold by ${((allocatableHoldUsedKg - SURVIVAL_TUNING.hold.allocatableKg) / 1_000).toFixed(1)} t.`
+    ? `The hold is over by ${((allocatableHoldUsedKg - SURVIVAL_TUNING.hold.allocatableKg) / 1_000).toFixed(1)} t. Take that much back off before departing.`
     : null;
   let costDucats = Number.MAX_SAFE_INTEGER;
   if (Object.keys(storeErrors).length === 0) costDucats = lisbonOutfittingCost(allocation);
   const moneyError = costDucats > SURVIVAL_TUNING.sponsorAdvanceDucats
-    ? `Allocation costs ${costDucats} ducats; the sponsor advance is ${SURVIVAL_TUNING.sponsorAdvanceDucats}.`
+    ? `These stores cost ${costDucats} ducats and the sponsor advanced only ${SURVIVAL_TUNING.sponsorAdvanceDucats}. Buy ${costDucats - SURVIVAL_TUNING.sponsorAdvanceDucats} ducats’ worth less.`
     : null;
   const waterDays = Math.floor(allocation.waterKg / (25 * 6));
   const provisionDays = Math.floor(allocation.provisionsKg / (25 * 3));
@@ -340,28 +363,184 @@ function estimatedTrack(active: Readonly<JourneyPlayerView>): readonly ChartPoin
   return points;
 }
 
+const ORDER_NAMES: Record<string, string> = {
+  set_heading: "Heading",
+  set_sailing_policy: "Sailing policy",
+  set_ration_policy: "Rations",
+};
+
+const ACTIVITY_NAMES: Record<string, string> = {
+  sailing: "Under sail",
+  careening: "Careening",
+  repair: "Repairs",
+  port_rest: "Resting in port",
+  east_west_observation: "Lying to and observing",
+  cape_survey: "Surveying the Cape",
+  cape_water_collection: "Watering",
+};
+
+type EastWestObservationActivity = Extract<
+  JourneyDayActivityResult,
+  { readonly kind: "east_west_observation" }
+>;
+
+const nauticalMiles = (mnm: number) => `${Math.round(mnm / 1_000)} nm`;
+
+/**
+ * The east-west observation is the one order whose whole value is the sentence it writes,
+ * so the log states the bracket the crew brought back and what it did to the chart. The
+ * fruitless answer is written out too, because knowing the coast is still far off is the
+ * only thing that day bought.
+ */
+function observationSentence(activity: Readonly<EastWestObservationActivity>): string {
+  const narrowed = activity.eastWestUncertaintyAfterMnm < activity.eastWestUncertaintyBeforeMnm
+    ? ` The east-west band narrowed from ${nauticalMiles(activity.eastWestUncertaintyBeforeMnm)} to ${nauticalMiles(activity.eastWestUncertaintyAfterMnm)}.`
+    : ` The east-west band was already inside that bracket at ${nauticalMiles(activity.eastWestUncertaintyAfterMnm)}, so nothing changed.`;
+  const shifted = activity.estimateCorrectionMnm === 0
+    ? ""
+    : ` The reckoning was moved ${nauticalMiles(Math.abs(activity.estimateCorrectionMnm))} ${activity.estimateCorrectionMnm > 0 ? "east" : "west"}.`;
+  switch (activity.result.kind) {
+    case "shoaling_water":
+      return ` The lead found shoaling water and the birds held a steady quarter, placing the ship within 200 nm of the coast east and west.${narrowed}${shifted}`;
+    case "land_signs":
+      return ` No bottom, but weed and land birds put a coast somewhere to the east, within 600 nm.${narrowed}${shifted}`;
+    case "open_ocean":
+      return " No bottom at a hundred fathom and no sign of land. The ship is more than 900 nm from any coast the crew knows, and the day bought nothing but that.";
+    case "none":
+    default:
+      return "";
+  }
+}
+
+const STORE_WORDS: Record<StoreKind, string> = {
+  water: "water",
+  provisions: "provisions",
+  repair_stores: "repair stores",
+  medicine: "medicine",
+};
+
+const INTENT_WORDS: Record<string, string> = {
+  pursue_objective: "continue to the Cape",
+  return_to_lisbon: "turn home for Lisbon",
+  objective_abandoned: "give up the Cape",
+};
+
+/**
+ * The log is the record the crew kept, so entries are written as sentences rather than
+ * as the identifiers the engine uses. Authored journey text is passed through unchanged.
+ */
+function survivalActionEntry(result: Readonly<SurvivalActionResult>): { title: string; text: string } {
+  switch (result.kind) {
+    case "lisbon_outfitting_set":
+      return { title: "Hold loaded", text: `Stores were loaded in Lisbon for ${result.costDucats} ducats.` };
+    case "departed_lisbon":
+      return { title: "Departed Lisbon", text: `The ship put to sea carrying ${result.moneyCarriedDucats} ducats.` };
+    case "entered_cape_verde_port":
+      return { title: "Into port", text: "The ship came into Cape Verde." };
+    case "left_cape_verde_port":
+      return { title: "Out of port", text: "The ship left Cape Verde and stood back out to sea." };
+    case "cape_verde_purchase":
+      return {
+        title: "Stores bought",
+        text: `Took on ${Math.round(result.quantityKg)} kg of ${STORE_WORDS[result.store]} for ${result.costDucats} ducats.`,
+      };
+    case "expedition_intent_set":
+      return {
+        title: "Intent changed",
+        text: `The ship will now ${INTENT_WORDS[result.intent] ?? "hold its present course"}.`,
+      };
+  }
+}
+
+const JOURNEY_TITLES: Record<string, string> = {
+  cape_verde_rumour_purchased: "Rumour bought",
+  cape_landfall_recognised: "The Cape recognised",
+  left_cape: "Left the Cape",
+  event_choice_resolved: "Decision",
+};
+
 function logEntry(entry: Readonly<CanonicalLogEntry>): LogEntryViewModel {
   if (entry.type === "command") {
-    return { index: entry.index, day: entry.committedDay, title: titleCase(entry.command), text: `Order changed to ${titleCase(entry.value)}.` };
+    return {
+      index: entry.index,
+      day: entry.committedDay,
+      title: ORDER_NAMES[entry.command] ?? "Order given",
+      text: `Changed to ${entry.value.replaceAll("_", " ")}.`,
+    };
   }
   if (entry.type === "survival_action") {
-    return { index: entry.index, day: entry.committedDay, title: titleCase(entry.result.kind), text: `The ${titleCase(entry.result.kind)} command was committed.` };
+    const written = survivalActionEntry(entry.result);
+    return { index: entry.index, day: entry.committedDay, title: written.title, text: written.text };
   }
   if (entry.type === "journey_action") {
-    return { index: entry.index, day: entry.committedDay, title: titleCase(entry.result.kind), text: entry.text };
+    return {
+      index: entry.index,
+      day: entry.committedDay,
+      title: JOURNEY_TITLES[entry.result.kind] ?? "Decision",
+      text: entry.text,
+    };
   }
   const weather = "observedWeather" in entry ? titleCase(entry.observedWeather) : "Fair";
-  const activity = "activity" in entry ? titleCase(entry.activity.kind) : "Sailing";
+  const activity = "activity" in entry ? ACTIVITY_NAMES[entry.activity.kind] ?? titleCase(entry.activity.kind) : "Under sail";
   const event = "event" in entry && entry.event !== "none" ? ` ${entry.event.title}: ${entry.event.text}` : "";
   const consequences = "delayedConsequences" in entry && entry.delayedConsequences.length > 0
     ? ` ${entry.delayedConsequences.map((item) => item.text).join(" ")}`
+    : "";
+  const observed = "activity" in entry && entry.activity.kind === "east_west_observation"
+    ? observationSentence(entry.activity)
     : "";
   return {
     index: entry.index,
     day: entry.committedDay,
     title: `${entry.date} — ${activity}`,
-    text: `${weather}. Water used ${(entry.waterConsumedKg / 1_000).toFixed(3)} t; provisions used ${(entry.provisionsConsumedKg / 1_000).toFixed(3)} t.${event}${consequences}`,
+    text: `${weather}. The crew drank ${Math.round(entry.waterConsumedKg)} kg of water and ate ${Math.round(entry.provisionsConsumedKg)} kg of provisions.${observed}${event}${consequences}`,
   };
+}
+
+/**
+ * A short standing summary of what the last east-west observation established, so the
+ * player can read the present bracket off the deck without hunting through the log.
+ */
+function lastObservationSummary(active: Readonly<JourneyPlayerView>): string {
+  const kind = active.journey.lastEastWestObservation.kind;
+  if (kind === "none") return "No east-west observation has been made yet.";
+  const latest = [...active.log].reverse().find((entry) =>
+    entry.type === "journey_day" && entry.activity.kind === "east_west_observation");
+  const detail = latest !== undefined
+    && latest.type === "journey_day"
+    && latest.activity.kind === "east_west_observation"
+    ? ` on day ${latest.committedDay}, band ${nauticalMiles(latest.activity.eastWestUncertaintyAfterMnm)}`
+    : "";
+  if (kind === "shoaling_water") return `Shoaling water${detail}. A coast lies within 200 nm east or west.`;
+  if (kind === "land_signs") return `Land signs${detail}. A coast lies within 600 nm to the east.`;
+  return `Open ocean${detail}. No coast within 900 nm.`;
+}
+
+/** Names why an east-west observation cannot be ordered right now, or null when it can. */
+function observationBlockedReason(active: Readonly<JourneyPlayerView>): string | null {
+  if (active.journey.outcome !== null) return "The expedition is over.";
+  if (active.journey.pendingEvent !== null) return "Answer the decision first.";
+  if (active.journey.location !== "at_sea") return "Only at sea.";
+  if (active.survival.status.kind !== "active") return "The ship cannot work the day.";
+  return null;
+}
+
+const OBSERVATION_WORDS: Record<string, string> = {
+  shoaling_water: "shoaling water, a coast within 200 nm",
+  land_signs: "land signs, a coast within 600 nm",
+  open_ocean: "open ocean, no coast within 900 nm",
+};
+
+/** One line per observation day, so the report can say why the band moved when it did. */
+function observationHistoryLine(point: Readonly<ObservationHistoryPoint>): string {
+  const what = OBSERVATION_WORDS[point.result] ?? point.result;
+  const narrowed = point.eastWestUncertaintyAfterMnm < point.eastWestUncertaintyBeforeMnm
+    ? `the east-west band closed from ${nauticalMiles(point.eastWestUncertaintyBeforeMnm)} to ${nauticalMiles(point.eastWestUncertaintyAfterMnm)}`
+    : `the east-west band stayed at ${nauticalMiles(point.eastWestUncertaintyAfterMnm)}`;
+  const moved = point.estimateCorrectionMnm === 0
+    ? ""
+    : `, and the reckoning shifted ${nauticalMiles(Math.abs(point.estimateCorrectionMnm))} ${point.estimateCorrectionMnm > 0 ? "east" : "west"}`;
+  return `${point.date} — ${what}: ${narrowed}${moved}.`;
 }
 
 function missionProgress(active: Readonly<JourneyPlayerView>): MissionProgressViewModel {
@@ -370,16 +549,16 @@ function missionProgress(active: Readonly<JourneyPlayerView>): MissionProgressVi
   const usedCapeVerde = active.log.some((entry) => entry.type === "survival_action" && entry.result.kind === "left_cape_verde_port");
   let milestone: string;
   if (active.journey.outcome !== null) milestone = "Finalize the expedition";
-  else if (active.journey.location === "cape") milestone = "Survey and collect evidence";
-  else if (active.journey.location === "cape_verde") milestone = objectiveAchieved ? "Deposit or return the report" : "Use Cape Verde and choose the next leg";
+  else if (active.journey.location === "cape") milestone = "Survey the Cape and gather evidence";
+  else if (active.journey.location === "cape_verde") milestone = objectiveAchieved ? "Leave a copy of the report, or carry it home" : "Use the port, then choose the next leg";
   else if (objectiveAchieved || returning) milestone = "Return to Lisbon";
-  else if (usedCapeVerde) milestone = "Seek the Cape";
-  else milestone = "Reach or use Cape Verde";
+  else if (usedCapeVerde) milestone = "Find the Cape";
+  else milestone = "Reach Cape Verde";
   const status = objectiveAchieved
-    ? "Cape recognised; secure the ship's return or a useful report."
+    ? "Cape recognised. Now get the ship, or at least the report, home."
     : active.survival.expeditionIntent === "objective_abandoned"
-      ? "Cape objective abandoned; bring the ship or report home."
-      : "Cape recognition is still required.";
+      ? "The Cape is given up. Bring the ship or the report home."
+      : "The Cape has not been recognised yet.";
   return { milestone, status };
 }
 
@@ -438,6 +617,9 @@ function buildExpedition(active: Readonly<JourneyPlayerView>): ExpeditionViewMod
       rationPolicy: active.rationPolicy,
       expeditionIntent: titleCase(active.survival.expeditionIntent),
       expeditionIntentValue: active.survival.expeditionIntent,
+      observationDaysSpent: active.journey.observationDaysSpent,
+      lastObservation: lastObservationSummary(active),
+      observationReason: observationBlockedReason(active),
     },
     log: safeLog,
     lastResult: safeLog[0] ?? null,
@@ -466,7 +648,7 @@ function effectsDescription(effects: Readonly<EventEffects>): string {
   }
   if (effects.abandonObjective === true) values.push("objective abandoned");
   if (effects.terminalReason !== undefined) values.push("expedition ends");
-  return values.length === 0 ? "No immediate numeric change is promised." : values.join(", ");
+  return values.length === 0 ? "No immediate change is promised." : values.join(", ");
 }
 
 function requirementDescription(requirement: Readonly<EventChoiceRequirement>): string {
@@ -478,7 +660,7 @@ function requirementDescription(requirement: Readonly<EventChoiceRequirement>): 
   if (requirement.minimumMedicineKg !== undefined) values.push(`${(requirement.minimumMedicineKg / 1_000).toFixed(2)} t medicine`);
   if (requirement.minimumMoraleBps !== undefined) values.push(`${(requirement.minimumMoraleBps / 100).toFixed(0)}% morale`);
   if ((requirement.requiredFlags?.length ?? 0) > 0) values.push("the prior preparation described in the event text");
-  return values.length === 0 ? "No additional minimum resource requirement." : `Requires ${values.join(", ")}.`;
+  return values.length === 0 ? "nothing you do not already have." : `${values.join(", ")}.`;
 }
 
 function buildEventChoices(active: Readonly<JourneyPlayerView>): readonly ChoiceViewModel[] {
@@ -493,23 +675,67 @@ function buildEventChoices(active: Readonly<JourneyPlayerView>): readonly Choice
       available: choice.available,
       reason: choice.reason,
       knownConsequence: authoredChoice === undefined
-        ? "The written log will record the committed decision."
+        ? "The log will record what you chose."
         : `${authoredChoice.immediateLogText} Known immediate effects: ${effectsDescription(authoredChoice.effects)}`,
       knownRequirement: authoredChoice === undefined
-        ? "No additional minimum resource requirement is shown."
+        ? "nothing you do not already have."
         : requirementDescription(authoredChoice.requirement),
     };
   });
 }
 
+const FULL_CONDITION_BPS = 10_000;
+
+function canRecogniseCapeFrom(active: Readonly<JourneyPlayerView>): boolean {
+  return active.journey.location === "at_sea"
+    && (active.navigation.landfall.kind === "visible_unrecognised"
+      || (active.navigation.landfall.kind === "recognised"
+        && active.navigation.landfall.landmarkId.includes("cape-goal")));
+}
+
+function canEnterCapeVerdeFrom(active: Readonly<JourneyPlayerView>): boolean {
+  return active.journey.location === "at_sea"
+    && active.navigation.landfall.kind === "recognised"
+    && active.navigation.landfall.landmarkId.includes("cape-verde");
+}
+
+/**
+ * Whether the deck-warning halt can offer the player anything today: a component that can
+ * still be repaired with the repair stores aboard, or a course decision that only the halt
+ * screen puts in front of them.
+ */
+function deckWarningHasResponse(active: Readonly<JourneyPlayerView>): boolean {
+  const repairable = active.stores.repairStoresKg >= SURVIVAL_TUNING.repair.at_sea.repairStoresKg
+    && SHIP_COMPONENTS.some((component) => shipComponentCondition(active.ship, component) < FULL_CONDITION_BPS);
+  return repairable || canRecogniseCapeFrom(active) || canEnterCapeVerdeFrom(active);
+}
+
+/**
+ * True when the only thing halting the ship is a warning with no response attached to it —
+ * the day-45 spoilage warnings on a sound ship, most often. Halting for one of those puts a
+ * screen of disabled buttons between the player and the next day, so the warning stays in
+ * the standing warning strip instead. It halts again the day a response opens up, or the day
+ * a further warning is raised.
+ */
+function isActionlessDeckWarning(active: Readonly<JourneyPlayerView>): boolean {
+  return active.journey.pendingEvent === null
+    && active.journey.outcome === null
+    && active.journey.location === "at_sea"
+    && active.navigation.interruption.kind === "none"
+    && active.survival.status.kind === "active"
+    && active.survival.interruption.kind === "warning"
+    && !deckWarningHasResponse(active);
+}
+
 function buildInterrupt(active: Readonly<JourneyPlayerView>, reportDeposited: boolean): InterruptViewModel | null {
+  if (isActionlessDeckWarning(active)) return null;
   const pending = active.journey.pendingEvent;
   let kind: InterruptViewModel["kind"];
   let title: string;
   let description: string;
   if (active.journey.outcome !== null) {
     kind = "terminal";
-    title = "Expedition ended";
+    title = "The expedition is over";
     description = active.journey.outcome.reason;
   } else if (pending !== null) {
     kind = "event";
@@ -518,21 +744,21 @@ function buildInterrupt(active: Readonly<JourneyPlayerView>, reportDeposited: bo
   } else if (active.journey.location === "cape_verde") {
     kind = "cape_verde";
     title = "Cape Verde — Porto da Ribeira Grande";
-    description = "Resupply from finite stock, rest, repair, careen, buy one rumour, or deposit the carried report.";
+    description = "The port sells only what it has left. Resupply, rest the crew, repair, careen the hull, buy one rumour, or leave a copy of your report here for safekeeping.";
   } else if (active.journey.location === "cape") {
     kind = "cape";
-    title = "The Cape objective";
-    description = "The landfall is recognised. Survey, collect water where evidence permits, or begin the return leg.";
+    title = "The Cape";
+    description = "You have recognised the Cape. Survey it, take on water if the chart says there is any, or start for home.";
   } else if (active.navigation.interruption.kind !== "none") {
     kind = "landfall";
-    title = active.navigation.interruption.kind === "landfall" ? "Landfall decision" : "Navigation interrupted";
+    title = active.navigation.interruption.kind === "landfall" ? "Land in sight" : "The ship needs orders";
     description = active.navigation.interruption.kind === "landfall"
-      ? `The latest landfall result is ${titleCase(active.navigation.interruption.result)}.`
-      : "Navigation requires attention before the next leg.";
+      ? `Land was sighted \u2014 ${titleCase(active.navigation.interruption.result)}.`
+      : "Give an order before the next leg begins.";
   } else if (active.survival.interruption.kind !== "none" || active.survival.status.kind !== "active") {
     kind = "survival";
-    title = "Deck warning";
-    description = active.survival.status.kind === "active" ? "A visible warning requires attention." : active.survival.status.message;
+    title = "Trouble aboard";
+    description = active.survival.status.kind === "active" ? "Something aboard needs attention before the ship sails on." : active.survival.status.message;
   } else {
     return null;
   }
@@ -563,11 +789,8 @@ function buildInterrupt(active: Readonly<JourneyPlayerView>, reportDeposited: bo
     outcomeReason: active.journey.outcome?.reason ?? null,
     statusMessage: active.survival.status.kind === "active" ? null : active.survival.status.message,
     warnings: active.survival.warnings.map((warning) => warning.message),
-    canRecogniseCape: active.journey.location === "at_sea" && (active.navigation.landfall.kind === "visible_unrecognised"
-      || (active.navigation.landfall.kind === "recognised"
-        && active.navigation.landfall.landmarkId.includes("cape-goal"))),
-    canEnterCapeVerde: active.journey.location === "at_sea" && active.navigation.landfall.kind === "recognised"
-      && active.navigation.landfall.landmarkId.includes("cape-verde"),
+    canRecogniseCape: canRecogniseCapeFrom(active),
+    canEnterCapeVerde: canEnterCapeVerdeFrom(active),
     canDismiss: pending === null && active.journey.outcome === null
       && active.survival.status.kind === "active"
       && active.journey.location === "at_sea",
@@ -608,7 +831,60 @@ function reportTrack(points: Readonly<AfterActionReport["estimatedTrack"]>): rea
   }));
 }
 
+function routeExplanations(
+  history: Readonly<AfterActionReport>["currentContributionHistory"],
+): readonly RouteExplanationViewModel[] {
+  const lines: RouteExplanationViewModel[] = [];
+  let fromDay: number | null = null;
+  let toDay = 0;
+  let dayCount = 0;
+  const closeRun = () => {
+    if (fromDay === null) return;
+    lines.push({
+      kind: "unexplained",
+      fromDay,
+      toDay,
+      dayCount,
+      text: dayCount === 1
+        ? `Day ${fromDay}: route divergence unexplained.`
+        : `Days ${fromDay}-${toDay}: route divergence unexplained (${dayCount} days).`,
+    });
+    fromDay = null;
+    dayCount = 0;
+  };
+  for (const point of history) {
+    if (point.explanation === "supported_by_reported_evidence") {
+      closeRun();
+      lines.push({
+        kind: "supported",
+        day: point.day,
+        text: `Day ${point.day}: reported evidence supports a current contribution of ${kgToNm(point.vectorMnmPerDay.xMnm).toFixed(1)} nm east/west and ${kgToNm(point.vectorMnmPerDay.yMnm).toFixed(1)} nm north/south.`,
+      });
+      continue;
+    }
+    if (fromDay === null) fromDay = point.day;
+    toDay = point.day;
+    dayCount += 1;
+  }
+  closeRun();
+  return lines;
+}
+
+/**
+ * The honest one-liner for a voyage where the reported evidence explained none of the
+ * divergence, so the section is not a list of one collapsed range.
+ */
+function routeExplanationSummary(lines: readonly RouteExplanationViewModel[]): string | null {
+  if (lines.length === 0 || lines.some((line) => line.kind !== "unexplained")) return null;
+  const total = lines.reduce((days, line) => days + (line.kind === "unexplained" ? line.dayCount : 0), 0);
+  const first = lines[0]!;
+  const last = lines.at(-1)!;
+  if (first.kind !== "unexplained" || last.kind !== "unexplained") return null;
+  return `No reported evidence explains the difference on any of the ${total} recorded ${total === 1 ? "day" : "days"}, day ${first.fromDay} to day ${last.toDay}.`;
+}
+
 function buildReport(report: Readonly<AfterActionReport>): ReportViewModel {
+  const currentExplanations = routeExplanations(report.currentContributionHistory);
   return {
     runNumber: report.runNumber,
     outcome: titleCase(report.outcome),
@@ -634,9 +910,12 @@ function buildReport(report: Readonly<AfterActionReport>): ReportViewModel {
       errorEastWestNm: kgToNm(point.errorMnm.xMnm),
       errorNorthSouthNm: kgToNm(point.errorMnm.yMnm),
     })),
-    currentExplanations: report.currentContributionHistory.map((point) => point.explanation === "supported_by_reported_evidence"
-      ? `Day ${point.day}: reported evidence supports a current contribution of ${kgToNm(point.vectorMnmPerDay.xMnm).toFixed(1)} nm east/west and ${kgToNm(point.vectorMnmPerDay.yMnm).toFixed(1)} nm north/south.`
-      : `Day ${point.day}: route divergence remains unexplained.`),
+    currentExplanations,
+    currentExplanationSummary: routeExplanationSummary(currentExplanations),
+    observations: report.observationHistory.map((point) => ({
+      day: point.day,
+      text: observationHistoryLine(point),
+    })),
     inheritedDifferences: report.nextExpeditionDifferences.map((change) => campaignFactView(change.after)),
   };
 }
@@ -692,6 +971,7 @@ export function buildAppViewModel(
 
 export function hasBlockingInterruption(view: Readonly<CampaignPlayerView>): boolean {
   const active = view.activeRun;
+  if (active !== null && isActionlessDeckWarning(active)) return false;
   return active === null
     || active.journey.pendingEvent !== null
     || active.journey.outcome !== null

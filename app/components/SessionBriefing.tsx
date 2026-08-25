@@ -12,10 +12,10 @@ export function SessionBriefing({ milestone, missionStatus, date, elapsedDays, a
     <section class="session-briefing" aria-label="Mission and current milestone">
       <div class="mission-summary">
         <span>Mission</span>
-        <p><strong>Recognise the Cape region.</strong> Return the ship or a useful report to Lisbon; improve the chart when worthwhile.</p>
+        <p><strong>Recognise the Cape region.</strong> Bring home the ship, or at least a useful report. Whatever the crew confirms stays on the chart.</p>
       </div>
       <div class="milestone-summary">
-        <span>Current milestone</span>
+        <span>Next step</span>
         <strong>{milestone}</strong>
         <small>{missionStatus}</small>
       </div>

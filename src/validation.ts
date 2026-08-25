@@ -224,6 +224,7 @@ export function assertSimulationCommand(value: unknown): asserts value is Simula
     || type === "recognise_cape_landfall"
     || type === "survey_cape_day"
     || type === "collect_cape_water"
+    || type === "observation_day"
     || type === "leave_cape"
   ) {
     assertExactKeys(value, ["type"], `${type} command`);
@@ -266,6 +267,7 @@ export function copyCommand(command: Readonly<SimulationCommand>): SimulationCom
     case "recognise_cape_landfall":
     case "survey_cape_day":
     case "collect_cape_water":
+    case "observation_day":
     case "leave_cape":
       return { type: command.type };
     case "choose_event":
@@ -299,6 +301,26 @@ function assertObservation(value: unknown, label: string): void {
   if (kind === "heavy_swell_noon") {
     assertExactKeys(value, ["kind", "northSouthUncertaintyMnm"], label);
     if (value["northSouthUncertaintyMnm"] !== 40_000) fail(`${label} heavy swell must reset to 40000 mnm`);
+    return;
+  }
+  fail(`${label}.kind is unknown`);
+}
+
+function assertEastWestObservation(value: unknown, label: string): void {
+  assertRecord(value, label);
+  const kind = value["kind"];
+  if (kind === "none" || kind === "open_ocean") {
+    assertExactKeys(value, ["kind"], label);
+    return;
+  }
+  if (kind === "land_signs") {
+    assertExactKeys(value, ["kind", "eastWestUncertaintyMnm"], label);
+    if (value["eastWestUncertaintyMnm"] !== 600_000) fail(`${label} land signs must bracket to 600000 mnm`);
+    return;
+  }
+  if (kind === "shoaling_water") {
+    assertExactKeys(value, ["kind", "eastWestUncertaintyMnm"], label);
+    if (value["eastWestUncertaintyMnm"] !== 200_000) fail(`${label} shoaling water must bracket to 200000 mnm`);
     return;
   }
   fail(`${label}.kind is unknown`);
@@ -694,7 +716,8 @@ function assertJourneyState(value: unknown, date: string): void {
   assertExactKeys(value, [
     "eventModel", "eventPrng", "dailyEventChancePermille", "location", "leg",
     "objectiveAchieved", "rumourPurchased", "capeSurveyDaysCompleted",
-    "surveyedLandmarkIds", "capeWaterCollectedKg", "facts", "flags", "pendingEvent",
+    "surveyedLandmarkIds", "capeWaterCollectedKg", "observationDaysSpent",
+    "lastEastWestObservation", "facts", "flags", "pendingEvent",
     "scheduledConsequences", "eventHistory", "firedThisLeg", "outcome",
   ], "journey");
   if (value["eventModel"] !== "authored-journey-events-v1") {
@@ -709,6 +732,8 @@ function assertJourneyState(value: unknown, date: string): void {
   }
   assertInteger(value["capeSurveyDaysCompleted"], "journey.capeSurveyDaysCompleted", 0, 1);
   assertInteger(value["capeWaterCollectedKg"], "journey.capeWaterCollectedKg", 0, 1_000_000_000);
+  assertInteger(value["observationDaysSpent"], "journey.observationDaysSpent", 0, 1_000_000);
+  assertEastWestObservation(value["lastEastWestObservation"], "journey.lastEastWestObservation");
   for (const key of ["surveyedLandmarkIds", "flags", "firedThisLeg"] as const) {
     if (!Array.isArray(value[key])) fail(`journey.${key} must be an array`);
     const unique = new Set<string>();
@@ -994,6 +1019,20 @@ function assertJourneyDayActivity(value: unknown, label: string): void {
     assertInteger(value["waterCollectedKg"], `${label}.waterCollectedKg`, 1, 12_000);
     return;
   }
+  if (value["kind"] === "east_west_observation") {
+    assertExactKeys(value, [
+      "kind", "result", "eastWestUncertaintyBeforeMnm", "eastWestUncertaintyAfterMnm",
+      "estimateCorrectionMnm",
+    ], label);
+    assertEastWestObservation(value["result"], `${label}.result`);
+    assertInteger(value["eastWestUncertaintyBeforeMnm"], `${label}.eastWestUncertaintyBeforeMnm`, 0);
+    assertInteger(value["eastWestUncertaintyAfterMnm"], `${label}.eastWestUncertaintyAfterMnm`, 0);
+    assertInteger(value["estimateCorrectionMnm"], `${label}.estimateCorrectionMnm`);
+    if (value["eastWestUncertaintyAfterMnm"] > value["eastWestUncertaintyBeforeMnm"]) {
+      fail(`${label} may never widen east-west uncertainty`);
+    }
+    return;
+  }
   assertSurvivalDayActivity(value, label);
 }
 
@@ -1251,10 +1290,11 @@ export function assertSimulationState(value: unknown): asserts value is Simulati
       || command.type === "repair_day"
       || command.type === "careen_day_at_cape_verde"
       || command.type === "survey_cape_day"
-      || command.type === "collect_cape_water";
+      || command.type === "collect_cape_water"
+      || command.type === "observation_day";
     const journeyOnly = [
       "purchase_cape_verde_rumour", "recognise_cape_landfall", "survey_cape_day",
-      "collect_cape_water", "leave_cape", "choose_event",
+      "collect_cape_water", "observation_day", "leave_cape", "choose_event",
     ].includes(command.type);
     const survivalOnly = ![
       "set_heading", "set_sailing_policy", "set_ration_policy", "advance_day",
@@ -1281,6 +1321,8 @@ export function assertSimulationState(value: unknown): asserts value is Simulati
           fail(`canonicalLog[${index}] activity does not match survey_cape_day`);
         } else if (command.type === "collect_cape_water" && log.activity.kind !== "cape_water_collection") {
           fail(`canonicalLog[${index}] activity does not match collect_cape_water`);
+        } else if (command.type === "observation_day" && log.activity.kind !== "east_west_observation") {
+          fail(`canonicalLog[${index}] activity does not match observation_day`);
         } else if (command.type === "repair_day") {
           if (
             log.activity.kind !== "repair"

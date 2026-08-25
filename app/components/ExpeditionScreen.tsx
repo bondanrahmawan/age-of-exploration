@@ -35,21 +35,21 @@ function DeckPanel({ model, controller }: { readonly model: ExpeditionViewModel;
         <article><span>Medicine</span><strong>{tonnes(deck.stores.medicineKg)}</strong></article>
         <article><span>Hold used</span><strong>{tonnes(deck.holdUsedKg)}</strong><small>{tonnes(deck.holdRemainingKg)} free</small></article>
         <article><span>Money</span><strong>{deck.moneyDucats}</strong><small>ducats</small></article>
-        <article><span>Crew</span><strong>{deck.crew.able}/{deck.crew.count}</strong><small>able / aboard</small></article>
+        <article><span>Crew</span><strong>{deck.crew.able}/{deck.crew.count}</strong><small>fit to work / aboard</small></article>
         <article><span>Health</span><strong>{percent(deck.crew.healthBps)}</strong></article>
         <article><span>Morale</span><strong>{percent(deck.crew.moraleBps)}</strong></article>
-        <article><span>Fouling</span><strong>{percent(deck.foulingSpeedLossBps)}</strong><small>speed loss</small></article>
+        <article><span>Fouling</span><strong>{percent(deck.foulingSpeedLossBps)}</strong><small>speed lost to hull growth</small></article>
       </div>
       <h3>Ship components</h3>
       <div class="component-grid">
         {SHIP_COMPONENTS.map((component) => {
           const condition = shipComponentCondition(deck.ship, component);
           const disabled = condition >= 10_000 || deck.stores.repairStoresKg < 250;
-          const reason = condition >= 10_000 ? "Already at full condition." : deck.stores.repairStoresKg < 250 ? "Requires 0.25 t repair stores." : null;
+          const reason = condition >= 10_000 ? "Already sound." : deck.stores.repairStoresKg < 250 ? "Needs 0.25 t of repair stores." : null;
           return (
             <article key={component}>
               <span>{titleCase(component)}</span><strong>{percent(condition)}</strong>
-              <button type="button" disabled={disabled} onClick={() => controller.repair(component, "at_sea")}>Repair one day</button>
+              <button type="button" disabled={disabled} onClick={() => controller.repair(component, "at_sea")}>Spend a day repairing</button>
               {reason !== null && <small>{reason}</small>}
             </article>
           );
@@ -58,11 +58,11 @@ function DeckPanel({ model, controller }: { readonly model: ExpeditionViewModel;
       <dl class="deck-details">
         <div><dt>Location</dt><dd>{deck.location}</dd></div>
         <div><dt>Weather</dt><dd>{deck.observedWeather}</dd></div>
-        <div><dt>Known wind</dt><dd>{deck.observedWind}</dd></div>
+        <div><dt>Observed wind</dt><dd>{deck.observedWind}</dd></div>
         <div><dt>Heading</dt><dd>{deck.heading}</dd></div>
         <div><dt>Sailing policy</dt><dd>{titleCase(deck.sailingPolicy)}</dd></div>
         <div><dt>Ration policy</dt><dd>{titleCase(deck.rationPolicy)}</dd></div>
-        <div><dt>Intent</dt><dd>{deck.expeditionIntent}</dd></div>
+        <div><dt>Expedition intent</dt><dd>{deck.expeditionIntent}</dd></div>
       </dl>
       {deck.warnings.length > 0 && <div class="warning-stack" aria-label="Active warnings">{deck.warnings.map((warning) => <p key={warning}>Warning: {warning}</p>)}</div>}
     </section>
@@ -72,7 +72,7 @@ function DeckPanel({ model, controller }: { readonly model: ExpeditionViewModel;
 function LogPanel({ model }: { readonly model: ExpeditionViewModel }) {
   return (
     <section class="log-panel" aria-labelledby="log-title" tabIndex={0} onKeyDown={handleBoundedScrollKeyDown}>
-      <div class="section-heading"><div><p class="eyebrow">Written record</p><h2 id="log-title">Expedition log</h2></div><p>{model.log.length} committed entries</p></div>
+      <div class="section-heading"><div><p class="eyebrow">Written record</p><h2 id="log-title">Ship’s log</h2></div><p>{model.log.length} entries</p></div>
       {model.log.length === 0 ? <p class="empty-state">The log is ready for the first order.</p> : (
         <ol class="log-list">
           {model.log.map((entry) => <li key={entry.index}><span>Day {entry.day}</span><strong>{entry.title}</strong><p>{entry.text}</p></li>)}
@@ -148,24 +148,29 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
             </label>
             <label>Expedition intent
               <select value={model.deck.expeditionIntentValue} onChange={(event) => controller.dispatchSimulation({ type: "set_expedition_intent", intent: event.currentTarget.value as typeof model.deck.expeditionIntentValue })}>
-                <option value="pursue_objective">Continue objective</option>
-                <option value="return_to_lisbon">Turn home</option>
-                <option value="objective_abandoned">Abandon objective</option>
+                <option value="pursue_objective">Continue to the Cape</option>
+                <option value="return_to_lisbon">Turn home for Lisbon</option>
+                <option value="objective_abandoned">Give up the Cape</option>
               </select>
             </label>
           </div>
           <div class="day-controls">
             <button class="primary primary-action" type="button" disabled={isAdvancing} onClick={() => void controller.advanceUntilInterrupted()}>
-              Advance until interrupted
-              <small>Sail day by day; stop before any decision.</small>
+              Sail until something happens
+              <small>Runs day after day and stops before any decision.</small>
             </button>
-            <button type="button" disabled={isAdvancing} aria-keyshortcuts="D" onClick={() => controller.advanceOneDay()}>Advance one day <kbd>D</kbd></button>
-            <button type="button" disabled={!isAdvancing} aria-keyshortcuts="Escape" onClick={() => controller.stopAdvance()}>Stop between days</button>
+            <button type="button" disabled={isAdvancing} aria-keyshortcuts="D" onClick={() => controller.advanceOneDay()}>Sail one day <kbd>D</kbd></button>
+            <button type="button" disabled={isAdvancing || model.deck.observationReason !== null} onClick={() => controller.dispatchSimulation({ type: "observation_day" })}>
+              Lie to and observe
+              <small>{model.deck.observationReason ?? `One day, no ground made. Sounds for a coast to fix east and west. ${model.deck.observationDaysSpent} spent so far.`}</small>
+            </button>
+            <button type="button" disabled={!isAdvancing} aria-keyshortcuts="Escape" onClick={() => controller.stopAdvance()}>Stop after this day</button>
           </div>
+          <p class="observation-summary">{model.deck.lastObservation}</p>
           <section class="record-rail" aria-label="Committed record" tabIndex={0} onKeyDown={handleBoundedScrollKeyDown}>
-            <p class="eyebrow">Committed record</p>
+            <p class="eyebrow">Ship’s log</p>
             {model.log.length === 0
-              ? <p class="empty-state">No sailing day has been committed yet.</p>
+              ? <p class="empty-state">Nothing logged yet.</p>
               : (
                 <ol class="record-list">
                   {model.log.map((entry, index) => (
@@ -186,7 +191,7 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
               {(["chart", "deck", "log"] as const).map((panel) => <button key={panel} type="button" role="tab" id={`tab-${panel}`} aria-selected={selectedPanel === panel} aria-controls={`panel-${panel}`} onClick={() => controller.selectPanel(panel)}>{titleCase(panel)}</button>)}
             </nav>
             <label class="animation-control">Motion
-              <select value={animationMode} aria-label="Animation" onChange={(event) => controller.setAnimationMode(event.currentTarget.value as AnimationMode)}>
+              <select value={animationMode} aria-label="Motion" onChange={(event) => controller.setAnimationMode(event.currentTarget.value as AnimationMode)}>
                 <option value="normal">Normal</option><option value="reduced">Reduced</option><option value="skipped">Skipped</option>
               </select>
             </label>

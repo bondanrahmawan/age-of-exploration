@@ -234,8 +234,8 @@ export function ActiveChart({ chart }: { readonly chart: ChartViewModel }) {
       <div class="chart-pane" ref={pane}>
         <p class="uncertainty-readout">
           <span>Position is estimated</span>
-          Uncertainty ±{chart.uncertaintyEastWestNm.toFixed(0)} nm east–west,
-          ±{chart.uncertaintyNorthSouthNm.toFixed(0)} nm north–south
+          The ship could be up to ±{chart.uncertaintyEastWestNm.toFixed(0)} nm east–west and
+          ±{chart.uncertaintyNorthSouthNm.toFixed(0)} nm north–south of this mark.
         </p>
         <svg
           class="chart"
@@ -244,7 +244,7 @@ export function ActiveChart({ chart }: { readonly chart: ChartViewModel }) {
           role="img"
           aria-labelledby="active-chart-svg-title active-chart-svg-desc"
         >
-          <title id="active-chart-svg-title">Accessible estimated-position chart</title>
+          <title id="active-chart-svg-title">Chart of the ship’s estimated position</title>
           <desc id="active-chart-svg-desc">
             The marker is the crew's estimate of where the ship is, not its true position. The dotted line is the
             estimated track and the hatched ellipse is the uncertainty around the estimate, not a coastline.
@@ -331,7 +331,7 @@ export function ActiveChart({ chart }: { readonly chart: ChartViewModel }) {
       </dl>
       {chart.knownCurrentStatements.length > 0 && (
         <div class="known-currents">
-          <h3>Charted current knowledge</h3>
+          <h3>What the chart says about currents</h3>
           {chart.knownCurrentStatements.map((statement) => <p key={statement}>{statement}</p>)}
         </div>
       )}
@@ -350,7 +350,7 @@ export function AfterActionChart({ estimated, actual }: {
     <section class="chart-shell report-chart" aria-labelledby="report-chart-title">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Finalized truth comparison</p>
+          <p class="eyebrow">What actually happened</p>
           <h2 id="report-chart-title">Estimated and actual tracks</h2>
         </div>
       </div>
@@ -362,7 +362,7 @@ export function AfterActionChart({ estimated, actual }: {
           role="img"
           aria-labelledby="report-svg-title report-svg-desc"
         >
-          <title id="report-svg-title">Finalized estimated and actual route comparison</title>
+          <title id="report-svg-title">The estimated route beside the route actually sailed</title>
           <desc id="report-svg-desc">The dotted line is the estimated route. The solid double-marked line is the actual route, revealed only in this finalized report. Grid lines are ruled in nautical miles.</desc>
           <ChartFrame transform={transform} box={box} />
           <polyline points={pointsAttribute(estimated, transform)} class="estimated-track" />

@@ -298,3 +298,118 @@ describe("WP3 day semantics, helper, outcomes, and projection", () => {
     expect(encoded).not.toContain("mutiny_seizure_warned");
   });
 });
+
+/** Grows the east-west band fast enough to demonstrate a narrowing without a long voyage. */
+const WIDE_ERROR_ENVIRONMENT: EnvironmentProvider = (context) => {
+  const base = NO_MOVEMENT_ENVIRONMENT(context);
+  if (!("schema" in base)) throw new Error("wide-error fixture requires a navigation environment");
+  return { ...base, uncertaintyPermille: 10_000, tackingUncertaintyPermille: 10_000 };
+};
+
+function atSea(seed: string, truePosition: { xMnm: number; yMnm: number }, estimatedPosition = truePosition) {
+  return createJourneyFixtureState({
+    contentVersion: "wp3-journey-v1",
+    runSeed: seed,
+    location: "at_sea",
+    truePosition,
+    estimatedPosition,
+    dailyEventChancePermille: 0,
+  });
+}
+
+const OPEN_OCEAN = { xMnm: -2_500_000, yMnm: -3_000_000 };
+const LAND_SIGNS = { xMnm: 700_000, yMnm: -3_000_000 };
+const SHOALING = { xMnm: 1_150_000, yMnm: -3_000_000 };
+
+function widened(state: JourneySimulationState, days: number) {
+  let next = state;
+  for (let index = 0; index < days; index += 1) {
+    next = applyCommand(next, { type: "advance_day" }, WIDE_ERROR_ENVIRONMENT) as JourneySimulationState;
+  }
+  return next;
+}
+
+function observe(state: JourneySimulationState) {
+  return applyCommand(state, { type: "observation_day" }, NO_MOVEMENT_ENVIRONMENT) as JourneySimulationState;
+}
+
+describe("east-west observation days", () => {
+  it("narrows the east-west band to the shoaling bracket and records why", () => {
+    const wide = widened(atSea("shoaling", SHOALING), 3);
+    expect(wide.uncertainty.eastWestMnm).toBeGreaterThan(200_000);
+    const observed = observe(wide);
+    expect(observed.uncertainty.eastWestMnm).toBe(200_000);
+    expect(observed.journey.lastEastWestObservation).toEqual({
+      kind: "shoaling_water",
+      eastWestUncertaintyMnm: 200_000,
+    });
+    expect(observed.journey.observationDaysSpent).toBe(1);
+    const entry = observed.canonicalLog.at(-1);
+    expect(entry?.type).toBe("journey_day");
+    if (entry?.type !== "journey_day" || entry.activity.kind !== "east_west_observation") {
+      throw new Error("the observation day must log its own activity");
+    }
+    expect(entry.activity.eastWestUncertaintyAfterMnm).toBeLessThan(entry.activity.eastWestUncertaintyBeforeMnm);
+  });
+
+  it("gives the wider land-signs bracket further off the shelf", () => {
+    const observed = observe(widened(atSea("signs", LAND_SIGNS), 3));
+    expect(observed.uncertainty.eastWestMnm).toBe(600_000);
+    expect(observed.journey.lastEastWestObservation.kind).toBe("land_signs");
+  });
+
+  it("returns open ocean far from the shelf and never converges on a longitude", () => {
+    const wide = widened(atSea("offshore", OPEN_OCEAN), 3);
+    const before = wide.uncertainty.eastWestMnm;
+    let observed = wide;
+    for (let index = 0; index < 6; index += 1) observed = observe(observed);
+    expect(observed.journey.lastEastWestObservation).toEqual({ kind: "open_ocean" });
+    expect(observed.journey.observationDaysSpent).toBe(6);
+    expect(observed.uncertainty.eastWestMnm).toBeGreaterThan(before);
+    expect(observed.estimatedPosition.xMnm).toBe(wide.estimatedPosition.xMnm);
+    expect(observed.crew.moraleBps).toBeLessThan(wide.crew.moraleBps);
+  });
+
+  it("corrects the estimate only as far as the bracket edge and never onto the truth", () => {
+    const state = atSea("edge", SHOALING, { xMnm: SHOALING.xMnm - 900_000, yMnm: SHOALING.yMnm });
+    const observed = observe(state);
+    expect(observed.estimatedPosition.xMnm).toBe(SHOALING.xMnm - 200_000);
+    expect(observed.estimatedPosition.xMnm).not.toBe(observed.truePosition.xMnm);
+  });
+
+  it("never widens a band that is already inside the bracket", () => {
+    const observed = observe(atSea("tight", SHOALING));
+    expect(observed.uncertainty.eastWestMnm).toBeLessThan(200_000);
+    const entry = observed.canonicalLog.at(-1);
+    if (entry?.type !== "journey_day" || entry.activity.kind !== "east_west_observation") {
+      throw new Error("the observation day must log its own activity");
+    }
+    expect(entry.activity.estimateCorrectionMnm).toBe(0);
+  });
+
+  it("leaks the bracket but never the true position", () => {
+    const observed = observe(atSea("projection", SHOALING, { xMnm: 900_000, yMnm: -3_000_000 }));
+    const encoded = JSON.stringify(getPlayerView(observed));
+    expect(encoded).toContain("shoaling_water");
+    expect(encoded).not.toContain("truePosition");
+    expect(encoded).not.toContain(String(observed.truePosition.xMnm));
+  });
+
+  it("refuses an observation day anywhere but at sea", () => {
+    expect(() => applyCommand(capeVerde("port"), { type: "observation_day" }, NO_MOVEMENT_ENVIRONMENT))
+      .toThrow(SimulationValidationError);
+  });
+
+  it("takes a landmark fix without letting a look-around finish the voyage", () => {
+    const state = atSea("home-waters", { xMnm: 0, yMnm: 0 }, { xMnm: 400_000, yMnm: 0 });
+    const observed = observe(state);
+    expect(observed.navigation.lastLandfall).toEqual({
+      kind: "recognised",
+      landmarkId: LANDMARK_IDS.lisbon,
+    });
+    expect(observed.estimatedPosition.xMnm).toBe(0);
+    expect(observed.journey.location).toBe("at_sea");
+    expect(observed.journey.outcome).toBeNull();
+  });
+
+});

@@ -1618,6 +1618,7 @@ At sea the player may:
 - Advance one day or advance until interrupted.
 - Inspect the chart, deck state, and log at any time.
 - Stop to repair, change rations, or turn back.
+- Spend a full day on a deliberate east-west observation instead of sailing.
 - Respond to an event choice.
 
 At Cape Verde the player may:
@@ -1707,8 +1708,11 @@ The base world contains:
 
 - One authored Atlantic wind field with calm, favourable, contrary, and storm states.
 - One hidden South Atlantic current whose vector is omitted from dead reckoning until learned.
+- One authored African shelf: a polyline approximating the Atlantic coast of Africa from Portugal to the Cape.
 - Weather generated from region, season, previous weather, and the run seed—not independent uncorrelated daily rolls.
 - No tactical sailing, collision physics, or spherical-earth route calculation.
+
+The shelf is **CONTRACT** as a line rather than a set of points, because coast-hugging and running down a latitude (§9.5) only work against something the ship can steer into and follow. Its vertices are **TUNING**. The shelf carries no ports, no landmarks, no facts to discover, and no landfall geometry; it is read only by the east-west observation in §34.5, and it never appears on the player's chart.
 
 ### 34.5 Navigation and the Error Ellipse
 
@@ -1738,6 +1742,29 @@ Observation rules:
 - A recognised landmark resets both axes to the landmark's chart confidence floor: 5 nm for a confirmed base-game landmark, larger for an uncertain one.
 - A local fix changes the estimate; it never teleports the true ship.
 - Unknown current remains silent until evidence creates or improves a current fact.
+
+**East-west observation.** Longitude has no daily equivalent of the noon sight, so without a deliberate order the east-west radius only ever grows until a recognised landmark fixes it. The player may therefore order a full day of observation instead of a day's sailing. The ship makes no commanded run; current, leeway, and weather still apply, stores are consumed normally, and the noon sight resolves as usual.
+
+The observation reports a **bracket**, never a position. It is resolved from the true distance to the authored African shelf:
+
+```text
+true distance to the shelf     result           east-west radius
+≤ 300 nm                       shoaling water   capped at 200 nm
+≤ 900 nm                       land signs       capped at 600 nm
+beyond                         open ocean       unchanged
+```
+
+Where a bracket applies, the estimate's east-west coordinate is clamped into the bracket either side of the truth, and the east-west radius is capped at the bracket width. The operation may narrow the radius and may move the estimate; it may never widen the radius, never move the estimate away from the truth, and never move the true ship.
+
+These rules are **CONTRACT**:
+
+- The distances, bracket widths, and any cost beyond the day itself are **TUNING**. The existence of a deliberate, player-ordered, costed east-west channel is not.
+- The bracket width disclosed to the player is exactly the east-west radius already drawn on the chart, so the observation reveals nothing the interface does not already show. The amount of the correction and its bound must both be visible and explicable.
+- Open ocean returns no correction at all. Repeating the observation offshore must never converge on a longitude, because §9.2 holds: at sea, longitude error only ever grows. The band narrows only as land approaches.
+- A fruitless observation is still information, and must be logged as such: it establishes that no known coast lies within the outer distance.
+- The observation changes neither sight radius nor landfall geometry. A ship may still pass the objective's charted position and miss it.
+- An observation day may recognise a landmark and take its fix, but only a sailing day can arrive home and resolve the run. A day that makes no run cannot complete a voyage.
+- Every observation day and its result are recorded in the canonical log and in the after-action report, so a run can be explained afterwards.
 
 The chart automatically records the estimated track. The player does not manually draw coordinate points in the base game.
 
@@ -1960,6 +1987,7 @@ The after-action report must show:
 - Objective status.
 - Facts observed, reported, disproved, and lost with the ship.
 - Estimated track versus true track, with the hidden current's contribution explained only where evidence supports it.
+- Every east-west observation day: when it was spent, what it returned, and what it did to the east–west radius.
 - Differences that will appear in the next expedition.
 
 Profit, letter grades, market saturation, debt, and multiple sponsor scoring are not base-game requirements.
@@ -2008,6 +2036,7 @@ In the base game:
 day tick and deterministic command resolution
 outfitting with hold and money constraints
 true position, estimate, error ellipse, noon sights, landmark fixes
+deliberate east-west observation days against one authored shelf
 one authored wind field and one initially hidden current
 water, provisions, repair stores, medicine
 pooled crew health and morale
@@ -2049,6 +2078,7 @@ The base game is ready for evaluation only when all of these pass:
 3. **Hidden truth:** a normal run exposes no true-position or unknown-current values before the after-action report.
 4. **Drift:** with an unknown current, true and estimated tracks diverge; once the current fact is sufficiently learned, later estimates account for it.
 5. **Latitude:** a clear noon sight narrows north–south uncertainty without erasing east–west uncertainty.
+5a. **Longitude:** an observation day near the shelf measurably narrows east–west uncertainty and says so in the log; the same order repeated in open ocean narrows nothing, however many days are spent on it.
 6. **Landfall:** a ship can miss Cape Verde or the Cape because its true position is outside sight radius even when its estimate reaches the chart symbol.
 7. **Fix:** a recognised landmark corrects the estimate and updates fact confidence.
 8. **Warnings:** water loss, ship loss, crew incapacity, and mutiny cannot terminate a run without a visible prior warning and an available response.

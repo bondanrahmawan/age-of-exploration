@@ -936,6 +936,19 @@ function buildAfterActionReport(
         yMnm: point.truePosition.yMnm - point.estimatedPosition.yMnm,
       },
     })),
+    observationHistory: active.journey.canonicalLog.flatMap((entry) =>
+      entry.type === "journey_day" && entry.activity.kind === "east_west_observation"
+        ? [{
+            day: entry.committedDay,
+            date: entry.date,
+            result: entry.activity.result.kind === "none"
+              ? "open_ocean" as const
+              : entry.activity.result.kind,
+            eastWestUncertaintyBeforeMnm: entry.activity.eastWestUncertaintyBeforeMnm,
+            eastWestUncertaintyAfterMnm: entry.activity.eastWestUncertaintyAfterMnm,
+            estimateCorrectionMnm: entry.activity.estimateCorrectionMnm,
+          }]
+        : []),
     currentContributionHistory: active.hiddenTrace
       .filter((point) => point.currentContributionMnm.xMnm !== 0 || point.currentContributionMnm.yMnm !== 0)
       .map((point) => supportingCurrent?.claimedValue.kind === "current_vector"
@@ -1195,7 +1208,7 @@ function assertAfterActionReport(value: unknown, label: string): void {
     "waterConsumedKg", "provisionsConsumedKg", "factsObserved", "factsReported",
     "factsDisproved", "factsLostWithShip", "reportSnapshotDay", "reportSnapshotHash",
     "campaignFactsChanged", "nextExpeditionDifferences", "estimatedTrack", "trueTrack",
-    "uncertaintyHistory", "currentContributionHistory",
+    "uncertaintyHistory", "currentContributionHistory", "observationHistory",
   ], label);
   if (item["format"] !== AFTER_ACTION_REPORT_FORMAT) throw new SimulationValidationError(`${label}.format is invalid`);
   integer(item["runNumber"], `${label}.runNumber`, 1, 1_000_000);
@@ -1258,6 +1271,22 @@ function assertAfterActionReport(value: unknown, label: string): void {
     } else {
       throw new SimulationValidationError(`${label}.currentContributionHistory[${index}].explanation is invalid`);
     }
+  }
+  if (!Array.isArray(item["observationHistory"])) throw new SimulationValidationError(`${label}.observationHistory must be an array`);
+  for (const [index, pointValue] of (item["observationHistory"] as unknown[]).entries()) {
+    const point = record(pointValue, `${label}.observationHistory[${index}]`);
+    exactKeys(point, [
+      "day", "date", "result", "eastWestUncertaintyBeforeMnm", "eastWestUncertaintyAfterMnm",
+      "estimateCorrectionMnm",
+    ], `${label}.observationHistory[${index}]`);
+    integer(point["day"], `${label}.observationHistory[${index}].day`);
+    isoDate(point["date"], `${label}.observationHistory[${index}].date`);
+    if (!["open_ocean", "land_signs", "shoaling_water"].includes(point["result"] as string)) {
+      throw new SimulationValidationError(`${label}.observationHistory[${index}].result is invalid`);
+    }
+    integer(point["eastWestUncertaintyBeforeMnm"], `${label}.observationHistory[${index}].eastWestUncertaintyBeforeMnm`, 0);
+    integer(point["eastWestUncertaintyAfterMnm"], `${label}.observationHistory[${index}].eastWestUncertaintyAfterMnm`, 0);
+    integer(point["estimateCorrectionMnm"], `${label}.observationHistory[${index}].estimateCorrectionMnm`);
   }
 }
 

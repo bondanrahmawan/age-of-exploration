@@ -313,6 +313,7 @@ body { min-height: 0; }
 .day-controls button { min-height: 42px; padding: .52rem .65rem; font-size: .76rem; }
 .day-controls button small { margin-top: .15rem; font-size: .68rem; line-height: 1.2; }
 .day-controls kbd { margin-left: .25rem; padding: .03rem .22rem; border: 1px solid currentColor; border-radius: 3px; font: inherit; }
+.observation-summary { flex: 0 0 auto; margin: 0; padding: .4rem .55rem; font-size: .7rem; line-height: 1.35; color: var(--ink); background: var(--paper-deep); border-left: 3px solid var(--teal); }
 .last-result { flex: 0 0 auto; margin-top: auto; max-height: 12rem; padding: .5rem .6rem; overflow: auto; overscroll-behavior: contain; color: var(--ink); background: var(--paper-deep); border-left: 3px solid var(--teal); }
 .record-rail { flex: 1 1 auto; min-height: 4.5rem; display: flex; flex-direction: column; margin-top: .15rem; padding: .5rem .6rem 0; overflow: auto; overscroll-behavior: contain; background: var(--paper-deep); border-left: 3px solid var(--teal); }
 .record-rail > .eyebrow { position: sticky; z-index: 1; top: -.5rem; margin: -.5rem -.6rem .3rem; padding: .5rem .6rem .3rem; background: var(--paper-deep); font-size: .62rem; }

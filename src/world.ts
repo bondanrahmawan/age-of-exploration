@@ -227,3 +227,106 @@ export function windBandForPosition(position: Readonly<PositionMnm>): WindBand {
   return ATLANTIC_WIND_FIELD.find((band) => contains(band.bounds, position))
     ?? ATLANTIC_WIND_FIELD[0]!;
 }
+
+export const AFRICAN_SHELF_ID = "shelf.african-atlantic" as const;
+
+/**
+ * The authored Atlantic coast of Africa, expressed as the polyline a lead line and a
+ * lookout can read from seaward. It carries no ports, facts, or landfall geometry; it
+ * exists only so that an east-west observation has a coast to measure against, because
+ * a coast is a line the player can run down and a landmark centre is not.
+ */
+export const AFRICAN_SHELF_VERTICES: readonly PositionMnm[] = deepFreeze([
+  { xMnm: 20_000, yMnm: 145_000 },
+  { xMnm: 135_000, yMnm: -155_000 },
+  { xMnm: 75_000, yMnm: -305_000 },
+  { xMnm: -190_000, yMnm: -650_000 },
+  { xMnm: -365_000, yMnm: -1_235_000 },
+  { xMnm: -445_000, yMnm: -1_440_000 },
+  { xMnm: -225_000, yMnm: -1_810_000 },
+  { xMnm: 80_000, yMnm: -2_060_000 },
+  { xMnm: 495_000, yMnm: -1_990_000 },
+  { xMnm: 900_000, yMnm: -2_060_000 },
+  { xMnm: 1_050_000, yMnm: -2_090_000 },
+  { xMnm: 1_045_000, yMnm: -2_300_000 },
+  { xMnm: 1_295_000, yMnm: -2_850_000 },
+  { xMnm: 1_405_000, yMnm: -3_700_000 },
+  { xMnm: 1_660_000, yMnm: -4_390_000 },
+]);
+
+export interface EastWestObservationTier {
+  readonly kind: "shoaling_water" | "land_signs";
+  readonly withinShelfDistanceMnm: number;
+  readonly eastWestUncertaintyMnm: number;
+}
+
+/**
+ * Ordered narrowest first. A deliberate east-west observation reports the first tier
+ * whose shelf distance contains the true position; beyond the last tier the day returns
+ * open ocean and the estimate is untouched.
+ */
+export const EAST_WEST_OBSERVATION_TIERS: readonly EastWestObservationTier[] = deepFreeze([
+  {
+    kind: "shoaling_water",
+    withinShelfDistanceMnm: 300_000,
+    eastWestUncertaintyMnm: 200_000,
+  },
+  {
+    kind: "land_signs",
+    withinShelfDistanceMnm: 900_000,
+    eastWestUncertaintyMnm: 600_000,
+  },
+]);
+
+/** Exact squared point-to-segment comparison, so shelf tiers never depend on floating point. */
+function withinDistanceOfSegment(
+  point: Readonly<PositionMnm>,
+  from: Readonly<PositionMnm>,
+  to: Readonly<PositionMnm>,
+  radiusMnm: number,
+): boolean {
+  const radius = BigInt(radiusMnm);
+  const squaredRadius = radius * radius;
+  const segmentX = BigInt(to.xMnm) - BigInt(from.xMnm);
+  const segmentY = BigInt(to.yMnm) - BigInt(from.yMnm);
+  const offsetX = BigInt(point.xMnm) - BigInt(from.xMnm);
+  const offsetY = BigInt(point.yMnm) - BigInt(from.yMnm);
+  const squaredLength = segmentX * segmentX + segmentY * segmentY;
+  if (squaredLength === 0n) {
+    return offsetX * offsetX + offsetY * offsetY <= squaredRadius;
+  }
+  const projection = offsetX * segmentX + offsetY * segmentY;
+  if (projection <= 0n) {
+    return offsetX * offsetX + offsetY * offsetY <= squaredRadius;
+  }
+  if (projection >= squaredLength) {
+    const endX = BigInt(point.xMnm) - BigInt(to.xMnm);
+    const endY = BigInt(point.yMnm) - BigInt(to.yMnm);
+    return endX * endX + endY * endY <= squaredRadius;
+  }
+  const cross = offsetX * segmentY - offsetY * segmentX;
+  return cross * cross <= squaredRadius * squaredLength;
+}
+
+/** True when the position lies no further than the radius from the authored shelf polyline. */
+export function withinShelfDistance(
+  position: Readonly<PositionMnm>,
+  radiusMnm: number,
+): boolean {
+  for (let index = 1; index < AFRICAN_SHELF_VERTICES.length; index += 1) {
+    const from = AFRICAN_SHELF_VERTICES[index - 1]!;
+    const to = AFRICAN_SHELF_VERTICES[index]!;
+    if (withinDistanceOfSegment(position, from, to, radiusMnm)) return true;
+  }
+  return false;
+}
+
+/** Resolves the authored observation tier for a true position, or null for open ocean. */
+export function eastWestObservationTier(
+  truePosition: Readonly<PositionMnm>,
+): EastWestObservationTier | null {
+  for (const tier of EAST_WEST_OBSERVATION_TIERS) {
+    if (withinShelfDistance(truePosition, tier.withinShelfDistanceMnm)) return tier;
+  }
+  return null;
+}

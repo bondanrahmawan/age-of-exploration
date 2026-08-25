@@ -22,7 +22,7 @@ const commands = [
 ];
 
 let state = createJourneyState({
-  contentVersion: "wp3-authored-journey-v1",
+  contentVersion: "wp3-authored-journey-v2",
   runSeed: "wp3-representative-route",
   dailyEventChancePermille: 1_000,
 });
