@@ -18,7 +18,8 @@ app-identified local-only web server, and opens the game in the default browser.
 Keep the launcher window open while playing; close it or press Ctrl+C to stop
 the game. Campaign saves remain in that browser's local storage.
 
-Repeated launches reuse the current build. An older Age of Exploration server
+Repeated launches reuse the current build and open another tab on the running
+game, so the address never has to be typed. An older Age of Exploration server
 or another application on the fixed save-preserving port is reported without
 opening the wrong page or starting a duplicate process.
 
@@ -53,6 +54,25 @@ pnpm test:e2e
 `pnpm build:engine` builds only the pure headless package. `pnpm build:app`
 builds the local browser application to the ignored `app-dist/` directory.
 The fixture and catalogue scripts build only the engine before running.
+
+## The game icon
+
+`public/favicon.ico` is drawn by [`scripts/make-icon.mjs`](scripts/make-icon.mjs)
+rather than stored as an opaque binary: a four-point compass needle, north in
+paper and the rest in gold-lamp on sea-deep, at 16, 24, 32, 48, and 64 pixels.
+The geometry and the palette are constants at the top of that file, so changing
+the mark is a readable diff.
+
+```powershell
+pnpm icon
+pnpm build
+```
+
+`pnpm test:icon` fails if the committed file is not what the generator draws,
+and the launcher's build check refuses a bundle whose icon is missing — a blank
+tab glyph otherwise looks exactly like a game that never had an icon. The
+entries are uncompressed DIBs, not embedded PNGs, so Windows can load the same
+file for a shortcut or a notification area icon.
 
 See [PRODUCT.md](PRODUCT.md) for the product brief,
 `docs/wp5-player-facing-base-game.md` for architecture, and

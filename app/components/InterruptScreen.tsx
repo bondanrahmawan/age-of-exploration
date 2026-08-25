@@ -40,7 +40,7 @@ function CapeVerdeActions({ model, controller }: { readonly model: InterruptView
       <section class="port-primary-actions" aria-labelledby="port-decisions-title">
         <div><p class="eyebrow">Current decision</p><h2 id="port-decisions-title">Choose the next leg</h2></div>
         <div class="choice-grid">
-          <button type="button" onClick={() => controller.depositReport()}>Leave a copy of the report <small>{model.reportDeposited ? "Replaces the copy already here with what the crew knows today." : "Keeps today’s facts safe at Cape Verde even if the ship is lost."}</small></button>
+          <button type="button" onClick={() => controller.depositReport()}>Leave a copy of the report <small>{model.record.atRisk === 0 ? (model.reportDeposited ? "The copy already here holds everything the crew knows." : "The crew has nothing yet that the chart does not hold.") : `Puts ${model.record.atRisk} ${model.record.atRisk === 1 ? "finding" : "findings"} beyond the sea’s reach. ${model.reportDeposited ? "Replaces the copy already here." : "Nothing is ashore yet."}`}</small></button>
           <button type="button" onClick={() => controller.dispatchSimulation({ type: "set_expedition_intent", intent: "return_to_lisbon" })}>Turn home <small>Sets the ship to return to Lisbon.</small></button>
           <button class="primary primary-action" type="button" disabled={model.careeningDaysCompleted !== 0 || model.survivalStatus !== "active"} onClick={() => controller.dispatchSimulation({ type: "leave_cape_verde_port" })}>Depart Cape Verde <small>{model.careeningDaysCompleted !== 0 ? `Finish careening first — ${model.careeningDaysCompleted} of 6 days done.` : model.survivalStatus !== "active" ? "The ship cannot sail in its present state." : "Sails on south, or home if you have turned back."}</small></button>
         </div>
@@ -121,6 +121,7 @@ export function InterruptScreen({ model, autosaveBoundary, controller }: { reado
       <SessionBriefing
         milestone={model.mission.milestone}
         missionStatus={model.mission.status}
+        record={model.record}
         date={model.date}
         elapsedDays={model.elapsedDays}
         autosaveBoundary={autosaveBoundary}

@@ -116,6 +116,7 @@ export interface CampaignRunSummary {
   readonly objectiveAchieved: boolean;
   readonly reportedFactCount: number;
   readonly lostFactCount: number;
+  readonly salvagedFactCount: number;
   readonly reportSnapshotDay: number | null;
   readonly reportSnapshotHash: string | null;
 }
@@ -180,6 +181,8 @@ export interface AfterActionReport {
   readonly factsReported: readonly CampaignFact[];
   readonly factsDisproved: readonly CampaignFact[];
   readonly factsLostWithShip: readonly CampaignFact[];
+  /** The same records as they reached Lisbon without the ship: capped confidence, never confirmed. */
+  readonly factsSalvagedFromLog: readonly CampaignFact[];
   readonly reportSnapshotDay: number | null;
   readonly reportSnapshotHash: string | null;
   readonly campaignFactsChanged: readonly CampaignFactChange[];
@@ -260,6 +263,12 @@ export interface CampaignPlayerView {
     readonly deposited: boolean;
     readonly date: string | null;
     readonly factCount: number;
+    /**
+     * Findings standing in this expedition's own log that no deposited copy holds. Counted
+     * from what the crew has written down, never from the hidden trace, so the number can
+     * be shown on deck without revealing anything the crew has not seen.
+     */
+    readonly unreportedFactCount: number;
   };
   readonly afterActionReports: readonly AfterActionReport[];
 }

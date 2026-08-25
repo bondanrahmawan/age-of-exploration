@@ -57,6 +57,12 @@ async function assertActiveTruthBoundary(page: Page): Promise<void> {
   await expect(page.getByText("Actual track, solid with round markers")).toHaveCount(0);
 }
 
+/** The heading control is a compass rose, so a course is set by choosing its point, not a list row. */
+async function steer(page: Page, heading: string): Promise<void> {
+  await page.getByRole("radio", { name: new RegExp(`^${heading} — `) }).click();
+  await expect(page.getByRole("radio", { name: new RegExp(`^${heading} — `) })).toHaveAttribute("aria-checked", "true");
+}
+
 async function outfitAndDepart(page: Page): Promise<void> {
   await expect(page.locator("main[data-screen='outfitting']")).toBeVisible();
   await page.getByLabel("Water tonnes").fill("20");
@@ -70,7 +76,7 @@ async function outfitAndDepart(page: Page): Promise<void> {
 }
 
 async function sailToCapeVerde(page: Page, heading: "SW" | "NNW"): Promise<void> {
-  await page.getByRole("combobox", { name: "Heading" }).selectOption(heading);
+  await steer(page, heading);
   await page.getByRole("button", { name: /Sail one day/ }).press("Enter");
   await expect(page.locator("main[data-screen='interrupt']")).toBeVisible();
   await page.getByRole("button", { name: /Enter Cape Verde port/ }).press("Enter");
@@ -83,7 +89,7 @@ async function completeRun(page: Page, runNumber: number): Promise<void> {
   if (runNumber === 1) await page.getByRole("button", { name: /Buy a rumour/ }).press("Enter");
   await page.getByRole("button", { name: /Depart Cape Verde/ }).press("Enter");
 
-  await page.getByRole("combobox", { name: "Heading" }).selectOption("SE");
+  await steer(page, "SE");
   await page.getByRole("button", { name: /Sail one day/ }).press("Enter");
   await page.getByRole("button", { name: /Recognise the Cape landfall/ }).press("Enter");
   await expect(page.getByRole("heading", { name: "The Cape", exact: true })).toBeVisible();
@@ -96,7 +102,7 @@ async function completeRun(page: Page, runNumber: number): Promise<void> {
   await sailToCapeVerde(page, "NNW");
   await page.getByRole("button", { name: /Leave a copy of the report/ }).press("Enter");
   await page.getByRole("button", { name: /Depart Cape Verde/ }).press("Enter");
-  await page.getByRole("combobox", { name: "Heading" }).selectOption("NE");
+  await steer(page, "NE");
   await page.getByRole("button", { name: /Sail one day/ }).press("Enter");
   await expect(page.getByRole("heading", { name: "The expedition is over" })).toBeVisible();
   await page.getByRole("button", { name: /Finalize and read the report/ }).press("Enter");
@@ -148,7 +154,7 @@ test("chart, log, skipped pacing, keyboard controls, and narrow layout remain us
   await page.getByRole("tab", { name: "Deck" }).press("Enter");
   await expect(page.getByRole("heading", { name: "Ship, crew, and stores" })).toBeVisible();
   await page.getByRole("tab", { name: "Chart" }).press("Enter");
-  await page.getByRole("combobox", { name: "Heading" }).selectOption("W");
+  await steer(page, "W");
   for (let day = 0; day < 12; day += 1) await page.getByRole("button", { name: /Sail one day/ }).press("Enter");
   await page.setViewportSize({ width: 520, height: 900 });
   await page.getByRole("tab", { name: "Log" }).press("Enter");
@@ -169,7 +175,7 @@ test("fixed expedition and interrupt workspaces hold required information at eve
   await outfitAndDepart(page);
   await assertFixedSessionLayout(page);
 
-  await page.getByRole("combobox", { name: "Heading" }).selectOption("SW");
+  await steer(page, "SW");
   await page.getByRole("button", { name: /Sail one day/ }).press("Enter");
   await expect(page.getByRole("heading", { name: "A known port" })).toBeVisible();
   await assertFixedSessionLayout(page);
@@ -189,7 +195,7 @@ test("a deck warning with nothing to answer never halts the voyage", async ({ pa
   await page.getByRole("button", { name: "Start a new campaign" }).press("Enter");
   await outfitAndDepart(page);
   await page.getByLabel("Motion").selectOption("skipped");
-  await page.getByRole("combobox", { name: "Heading" }).selectOption("W");
+  await steer(page, "W");
 
   // The day-45 spoilage warnings arrive on a sound ship, so nothing on a halt screen could
   // answer them. The voyage must sail straight through them.
@@ -205,7 +211,7 @@ test("a deck warning with nothing to answer never halts the voyage", async ({ pa
 test("five uneventful skipped-animation days resolve under five seconds", async ({ page }) => {
   await page.getByRole("button", { name: "Start a new campaign" }).press("Enter");
   await outfitAndDepart(page);
-  await page.getByRole("combobox", { name: "Heading" }).selectOption("W");
+  await steer(page, "W");
   await page.getByLabel("Motion").selectOption("skipped");
   const start = Date.now();
   for (let day = 0; day < 5; day += 1) await page.getByRole("button", { name: /Sail one day/ }).press("Enter");

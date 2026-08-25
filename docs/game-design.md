@@ -1119,7 +1119,7 @@ Each day:
 
 - **No unwarned kills.** Nothing may end the expedition without a prior event that made the danger visible and offered an action.
 - **Every event has a spendable option.** At least one choice must convert a resource the player might hold — days, stores, money, morale, a person's loyalty — into a better outcome. Pure coin-flips are not choices.
-- **Death spirals must be escapable at a price.** Not free. A player at 15% morale, no water, and a cracked mast should always have one terrible option available, and it should cost them the objective.
+- **Death spirals must be escapable at a price.** Not free. A player at 15% morale, no water, and a cracked mast should always have one terrible option available, and it should cost them the objective. The escape being always *legal* is not the same as it being cheap: an unconditional branch that costs nothing lets a careful player decline every consequence in the game. See §34.9 on unfinished work.
 - **Foreshadow, then fire.** Storms build over two days. Sickness starts as fatigue. Mutiny grumbles.
 
 ### 22.3 Example — Storm
@@ -1745,26 +1745,39 @@ Observation rules:
 
 **East-west observation.** Longitude has no daily equivalent of the noon sight, so without a deliberate order the east-west radius only ever grows until a recognised landmark fixes it. The player may therefore order a full day of observation instead of a day's sailing. The ship makes no commanded run; current, leeway, and weather still apply, stores are consumed normally, and the noon sight resolves as usual.
 
-The observation reports a **bracket**, never a position. It is resolved from the true distance to the authored African shelf:
+The observation reports a **bracket**, never a position. The tier is resolved from the true distance to the authored African shelf, and each tier has an entry bracket and a floor:
 
 ```text
-true distance to the shelf     result           east-west radius
-≤ 300 nm                       shoaling water   capped at 200 nm
-≤ 900 nm                       land signs       capped at 600 nm
-beyond                         open ocean       unchanged
+true distance to the shelf     result           entry bracket   floor
+≤ 300 nm                       shoaling water   200 nm          80 nm
+≤ 900 nm                       land signs       600 nm          300 nm
+beyond                         open ocean       none            none
 ```
 
-Where a bracket applies, the estimate's east-west coordinate is clamped into the bracket either side of the truth, and the east-west radius is capped at the bracket width. The operation may narrow the radius and may move the estimate; it may never widen the radius, never move the estimate away from the truth, and never move the true ship.
+First contact with a tier establishes its entry bracket. Ordering the observation again while the ship is still in the same tier closes a third of the distance remaining between the present bracket and that tier's floor, never stepping less than 5 nm and never passing the floor. Sustained coastal work therefore keeps paying at a diminishing rate and terminates at a hard bound the crew can never beat.
+
+Where a bracket applies, the estimate's east-west coordinate is clamped into that bracket either side of the truth, and the east-west radius is capped at the bracket width. The operation may narrow the radius and may move the estimate; it may never widen the radius, never move the estimate away from the truth, and never move the true ship.
+
+An observation that cannot buy anything is **refused before the day is spent**. Two conditions refuse it, and both are decided from state the player can already see — the radius drawn on the chart and the last committed day — so the interface greys the order out for exactly the reason the engine would reject it:
+
+```text
+condition                                                    refusal
+east-west radius already ≤ the narrowest floor (80 nm)       no tier anywhere can better it
+the last committed day was an observation that gained        the ship has made no run since,
+nothing                                                      so the same ground is still the answer
+```
 
 These rules are **CONTRACT**:
 
-- The distances, bracket widths, and any cost beyond the day itself are **TUNING**. The existence of a deliberate, player-ordered, costed east-west channel is not.
-- The bracket width disclosed to the player is exactly the east-west radius already drawn on the chart, so the observation reveals nothing the interface does not already show. The amount of the correction and its bound must both be visible and explicable.
-- Open ocean returns no correction at all. Repeating the observation offshore must never converge on a longitude, because §9.2 holds: at sea, longitude error only ever grows. The band narrows only as land approaches.
-- A fruitless observation is still information, and must be logged as such: it establishes that no known coast lies within the outer distance.
+- The distances, bracket widths, floors, the fraction closed per repeat, the minimum step, and any cost beyond the day itself are **TUNING**. The existence of a deliberate, player-ordered, costed east-west channel is not, and neither is the existence of a hard per-tier floor.
+- The floor is coastal recognition running out of resolution, not longitude becoming measurable. A pilot can tell one stretch of shelf from another only so well, because the shelf looks much the same for a long way. The tier is chosen by where the ship truly is, never by how many days the crew has spent looking, so no amount of effort can improve on standing closer to land.
+- No bracket disclosed to the player is ever tighter than the east-west radius already drawn on the chart, so the observation reveals nothing the interface does not already show. The amount of the correction and its bound must both be visible and explicable. The floors are public numbers.
+- Open ocean returns no correction at all. Repeating the observation offshore must never converge on a longitude, because §9.2 holds: at sea, longitude error only ever grows. The band narrows only as land approaches, and only down to the floor of the tier the ship is actually in.
+- A fruitless observation is still information the first time, and must be logged as such: it establishes that no known coast lies within the outer distance. Repeating it from the same standing is not information, and is refused rather than logged.
+- A refused observation consumes no day, no stores, and no morale, and leaves every byte of state and all three PRNG streams untouched.
 - The observation changes neither sight radius nor landfall geometry. A ship may still pass the objective's charted position and miss it.
 - An observation day may recognise a landmark and take its fix, but only a sailing day can arrive home and resolve the run. A day that makes no run cannot complete a voyage.
-- Every observation day and its result are recorded in the canonical log and in the after-action report, so a run can be explained afterwards.
+- Every observation day and its result are recorded in the canonical log and in the after-action report, and a day that failed to narrow the band must read as such rather than as silence, so a run can be explained afterwards.
 
 The chart automatically records the estimated track. The player does not manually draw coordinate points in the base game.
 
@@ -1904,6 +1917,7 @@ warning stage, if potentially terminal
 2–4 choices
 choice requirements
 immediate state changes
+unfinished-work delta
 delayed flags or follow-ups
 knowledge revealed or confidence changed
 ```
@@ -1927,6 +1941,53 @@ At least:
 - No event may violate §22.2.
 
 At most one choice event is presented per day. The daily event chance and weights are **TUNING**; the seeded selection procedure in §22.1 is **CONTRACT**.
+
+#### Unfinished work
+
+Crew health, morale, and hull condition have no other source of drift on a normal
+voyage: normal rations move neither, and the ship takes no damage except through
+events. The escalation half of the catalogue — hull leak, fatigue, scurvy, and the
+whole mutiny chain — is hard-gated on those three being low. Without a mechanism
+that carries a healthy expedition downwards, those gates never open and half the
+authored content is unreachable in play.
+
+Unfinished work is that mechanism. It is a single integer on journey state: the
+count of jobs the expedition has put off rather than done.
+
+**CONTRACT.** It is earned, spent, and read as follows.
+
+- Every event choice may carry an unfinished-work delta. A branch that defers,
+  watches, endures, or spends a day on something other than the ship adds to the
+  count. A branch that spends stores, medicine, or labour to finish the job takes
+  from it.
+- A ship at sea adds one on its own account every `baselineAccrualDays`, whether or
+  not an event asked. Without an unavoidable source, a well-outfitted expedition
+  clears the count to zero and coasts.
+- A repair day removes one, at the standing cost of a day and repair stores. This is
+  the response available at any time, independent of what the events offer.
+- Every day above `toleranceBeforeWear`, each excess job wears crew health, crew
+  morale, and hull by a fixed rate. A short list is normal seamanship and costs
+  nothing; a long one is what carries the expedition towards the gates.
+- Events may hard-gate on a minimum count, weight themselves against it, and read it
+  in remembered text, exactly as they already do with preparation flags. Caution has
+  a memory in the same way preparation does.
+
+**CONTRACT.** §22.2's "death spirals must be escapable at a price" is enforced on the
+catalogue, not left to authoring judgement: every event must keep an unconditional
+branch that a depleted expedition can always take, and that branch must cost
+something — real condition, an unfinished job, a scheduled consequence, or the
+objective. A branch that is both unconditional and free is a catalogue error.
+
+The maximum, tolerance, accrual interval, wear rates, and per-choice deltas are
+**TUNING**.
+
+At least:
+
+- Eight events must offer a branch that adds to unfinished work.
+- Eight events must offer a branch that removes from it.
+
+The count is shown on the deck in plain language beside the other standing costs. It
+is not hidden state: a pressure the player cannot see is not a decision.
 
 ### 34.10 Knowledge, Reports, and Campaign Persistence
 
@@ -1960,13 +2021,16 @@ When a recognised landfall reveals at least 50 nm of sustained east–west discr
 Persistence rule:
 
 - Returning to Lisbon reports every eligible fact in the carried log.
-- Depositing a report at Cape Verde creates a snapshot of eligible facts known at that moment.
-- If the ship is later lost, only the last deposited snapshot persists.
-- Unreported observations disappear with the expedition.
-- A disproved rumour remains on record as disproved; it is not silently deleted.
+- Depositing a report at Cape Verde creates a snapshot of eligible facts known at that moment. The port is entered from a recognised Cape Verde landfall, outbound or homebound, so a ship that routes home past the island can always deposit a second time.
+- If the ship is later lost, the last deposited snapshot persists at full strength.
+- Observations made after the last deposit are not erased with the ship. Word of them reaches Lisbon as a salvaged log: one piece of evidence per finding, entered at its own confidence or the salvage cap for that finding, whichever is lower. Salvaged evidence therefore never on its own reaches the 70 that automatic navigation correction requires, and never completes the run objective.
+- Salvage has two caps, because evidence has two qualities. A finding produced by a completed survey of a landmark the crew positively identified is capped at 65; everything else is capped at 40. The survey tier is earned by the days actually spent: recognising a landmark and leaving without surveying it earns nothing, and an abandoned survey earns nothing.
+- A disproved rumour remains on record as disproved, whether reported or salvaged; it is not silently deleted.
 - Starting a new expedition loads only reported facts and prior run summaries, never hidden truth.
 
-This report-deposit rule is the base game's implementation of “failure can still buy knowledge.” Lifeboats, passing ships, caches, and surviving officers are deferred.
+The salvage caps of 40 and 65 are **TUNING**. That a lost expedition degrades its unreported record rather than erasing it, that a deposited report is strictly stronger than salvage of the same finding, that evidence from a completed landmark survey salvages above evidence gathered at sea, and that salvage alone — at either cap — cannot confirm a fact or complete the objective, are **CONTRACT**.
+
+The report deposit and the salvaged log beneath it are the base game's implementation of “failure can still buy knowledge”: the deposit is what a well-run failure banks, and salvage is the floor under every other one, so no voyage that learned something moves the chart by nothing. The survey tier keeps that floor proportional to what was actually proved, and puts a real decision at the landmark itself — recognise it and run, or spend the days on it knowing the ship may not carry the result home. Lifeboats, passing ships, and caches remain deferred — salvage is a confidence rule, not a modelled survivor, and there is no second deposit point away from a port.
 
 ### 34.11 Run Outcomes and After-Action Report
 
@@ -1974,18 +2038,22 @@ Every run ends with exactly one primary outcome:
 
 ```text
 Full success       Cape recognised and ship returns to Lisbon
-Report success     Cape recognised; ship lost; deposited report proves useful progress
+Report success     Cape recognised; expedition lost; deposited report proves useful progress
 Partial return     Ship returns without recognising the Cape
 Objective failure  Ship/report lost or expedition otherwise terminated
 ```
 
+Report success turns on the expedition ending in a terminal loss, not on which loss it was. Thirst, starvation, and disease end an expedition through crew health rather than the hull, and a report already ashore proves the Cape for a crew that died of thirst exactly as it does for one that went down with the ship.
+
 The after-action report must show:
 
 - Outcome and reason.
+- Why those two are what they are together. Outcome and objective status answer different questions and may answer them in opposite directions — a Cape found and a proof drowned reads as objective failure with the objective achieved. The report must state that relation in plain words rather than leaving two fields to be reconciled by the player.
 - Crew and ship condition.
 - Days elapsed and stores consumed.
 - Objective status.
-- Facts observed, reported, disproved, and lost with the ship.
+- Facts observed, reported, disproved, lost with the ship, and salvaged from the log at reduced confidence.
+- What the written record stands to lose while the voyage is still running, not only in the post-mortem: how many findings ride on an undeposited log, and what a deposited copy already holds.
 - Estimated track versus true track, with the hidden current's contribution explained only where evidence supports it.
 - Every east-west observation day: when it was spent, what it returned, and what it did to the east–west radius.
 - Differences that will appear in the next expedition.
@@ -2041,7 +2109,7 @@ one authored wind field and one initially hidden current
 water, provisions, repair stores, medicine
 pooled crew health and morale
 hull, mast, sails, rudder
-Cape Verde port and report deposit
+Cape Verde port, report deposit, and the salvaged log
 Cape landfall and optional water-source discovery
 fouling and spoilage on the return
 20+ authored events

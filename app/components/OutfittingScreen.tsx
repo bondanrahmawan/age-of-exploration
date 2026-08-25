@@ -61,7 +61,8 @@ export function OutfittingScreen({ model, preview, autosaveBoundary, controller 
         <div>
           <p class="eyebrow">Lisbon · 1 April 1488</p>
           <h1>Outfit and depart</h1>
-          <p class="lede"><strong>Mission:</strong> find the Cape region, then bring the ship — or at least a useful report — home to Lisbon. Anything the crew confirms on the way stays on the chart for the next voyage.</p>
+          <p class="lede"><strong>Mission:</strong> find the Cape region, then bring the ship — or at least a useful report — home to Lisbon.</p>
+          <p class="lede briefing-note">Cape Verde lies on the way out and on the way back. Its port sells water, provisions, repair stores and medicine for the ducats you do not spend here, dearer than Lisbon charges. It is also the one place ashore where a copy of the report can be left, and a copy left there outlives the ship. Findings that reach no port come home as hearsay, at reduced confidence, if they come home at all.</p>
         </div>
         <p class="autosave-status"><span class="save-dot" aria-hidden="true" />Saved · {autosaveBoundary}</p>
       </header>
@@ -112,6 +113,7 @@ export function OutfittingScreen({ model, preview, autosaveBoundary, controller 
                 <div><dt>Cost of these stores</dt><dd>{validation.costDucats} ducats</dd></div>
                 <div><dt>Ducats left to carry</dt><dd>{validation.moneyRemainingDucats} ducats</dd></div>
               </dl>
+              <p class="hold-caption">Ducats you do not spend here are what buys resupply at Cape Verde.</p>
               {validation.capacityError !== null && <p class="validation-error" role="alert">{validation.capacityError}</p>}
               {validation.moneyError !== null && <p class="validation-error" role="alert">{validation.moneyError}</p>}
             </div>
@@ -142,7 +144,7 @@ export function OutfittingScreen({ model, preview, autosaveBoundary, controller 
                       <strong>Expedition {run.runNumber}: {run.outcome}</strong>
                       <span>{run.finalDate} · {run.elapsedDays} days</span>
                       <p>{run.reason}</p>
-                      <small>{run.reportedFactCount} facts reached the chart · {run.lostFactCount} lost with the ship</small>
+                      <small>{run.reportedFactCount} facts reached the chart{run.salvagedFactCount > 0 ? ` · ${run.salvagedFactCount} salvaged from the log at reduced confidence` : ""}</small>
                     </li>
                   ))}
                 </ol>

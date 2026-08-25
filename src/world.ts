@@ -257,26 +257,52 @@ export const AFRICAN_SHELF_VERTICES: readonly PositionMnm[] = deepFreeze([
 export interface EastWestObservationTier {
   readonly kind: "shoaling_water" | "land_signs";
   readonly withinShelfDistanceMnm: number;
-  readonly eastWestUncertaintyMnm: number;
+  /** What one look establishes on first contact with this tier. */
+  readonly entryBracketMnm: number;
+  /** The best this tier can ever establish, however many days the crew works it. */
+  readonly floorMnm: number;
 }
 
 /**
  * Ordered narrowest first. A deliberate east-west observation reports the first tier
  * whose shelf distance contains the true position; beyond the last tier the day returns
  * open ocean and the estimate is untouched.
+ *
+ * The entry bracket is what a single look buys. Staying with the same tier and working it
+ * day after day — more soundings, more bottom samples, more of the same birds on the same
+ * quarter — closes the bracket toward the floor. The floor is the resolution of coastal
+ * recognition itself, not of longitude: a pilot can tell one stretch of shelf from another
+ * only so well, because the shelf looks much the same for a long way north and south.
  */
 export const EAST_WEST_OBSERVATION_TIERS: readonly EastWestObservationTier[] = deepFreeze([
   {
     kind: "shoaling_water",
     withinShelfDistanceMnm: 300_000,
-    eastWestUncertaintyMnm: 200_000,
+    entryBracketMnm: 200_000,
+    floorMnm: 80_000,
   },
   {
     kind: "land_signs",
     withinShelfDistanceMnm: 900_000,
-    eastWestUncertaintyMnm: 600_000,
+    entryBracketMnm: 600_000,
+    floorMnm: 300_000,
   },
 ]);
+
+/**
+ * The narrowest floor any tier can reach. A band already this tight cannot be improved by
+ * an observation anywhere on the map, which is what lets the interface refuse the order
+ * without consulting the true position.
+ */
+export const EAST_WEST_OBSERVATION_FLOOR_MNM: number = Math.min(
+  ...EAST_WEST_OBSERVATION_TIERS.map((tier) => tier.floorMnm),
+);
+
+/** Each further day working the same tier closes this share of the remaining gap. */
+export const EAST_WEST_OBSERVATION_CLOSE_PERMILLE = 333;
+
+/** The smallest step a further day may take, so convergence lands on the floor exactly. */
+export const EAST_WEST_OBSERVATION_MIN_STEP_MNM = 5_000;
 
 /** Exact squared point-to-segment comparison, so shelf tiers never depend on floating point. */
 function withinDistanceOfSegment(

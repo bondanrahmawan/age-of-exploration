@@ -16,7 +16,7 @@ async function bootstrap(): Promise<void> {
     new PreferenceRepository(globalThis.localStorage),
     seedSource,
     {
-      contentVersion: "base-game-v2",
+      contentVersion: "base-game-v3",
       ...(e2e ? { dailyEventChancePermille: 0 } : {}),
       ...(environmentProvider === undefined ? {} : { environmentProvider }),
       prefersReducedMotion: globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches,

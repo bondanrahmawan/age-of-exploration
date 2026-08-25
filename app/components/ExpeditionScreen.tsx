@@ -5,6 +5,7 @@ import type { GameActions } from "../controller.js";
 import type { AnimationMode, ExpeditionPanel, ExpeditionViewModel } from "../view-model.js";
 import { shipComponentCondition } from "../view-model.js";
 import { ActiveChart } from "./ActiveChart.js";
+import { HeadingRose } from "./CompassRose.js";
 import { SessionBriefing } from "./SessionBriefing.js";
 
 const titleCase = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -39,6 +40,7 @@ function DeckPanel({ model, controller }: { readonly model: ExpeditionViewModel;
         <article><span>Health</span><strong>{percent(deck.crew.healthBps)}</strong></article>
         <article><span>Morale</span><strong>{percent(deck.crew.moraleBps)}</strong></article>
         <article><span>Fouling</span><strong>{percent(deck.foulingSpeedLossBps)}</strong><small>speed lost to hull growth</small></article>
+        <article><span>Jobs outstanding</span><strong>{deck.unfinishedWork}</strong><small>{deck.unfinishedWorkNote}</small></article>
       </div>
       <h3>Ship components</h3>
       <div class="component-grid">
@@ -59,11 +61,12 @@ function DeckPanel({ model, controller }: { readonly model: ExpeditionViewModel;
         <div><dt>Location</dt><dd>{deck.location}</dd></div>
         <div><dt>Weather</dt><dd>{deck.observedWeather}</dd></div>
         <div><dt>Observed wind</dt><dd>{deck.observedWind}</dd></div>
-        <div><dt>Heading</dt><dd>{deck.heading}</dd></div>
+        <div><dt>Heading</dt><dd>{deck.heading} — {deck.pointOfSail.label}</dd></div>
         <div><dt>Sailing policy</dt><dd>{titleCase(deck.sailingPolicy)}</dd></div>
         <div><dt>Ration policy</dt><dd>{titleCase(deck.rationPolicy)}</dd></div>
         <div><dt>Expedition intent</dt><dd>{deck.expeditionIntent}</dd></div>
       </dl>
+      <p class="sail-note">{deck.pointOfSail.note}</p>
       {deck.warnings.length > 0 && <div class="warning-stack" aria-label="Active warnings">{deck.warnings.map((warning) => <p key={warning}>Warning: {warning}</p>)}</div>}
     </section>
   );
@@ -109,6 +112,7 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
       <SessionBriefing
         milestone={model.mission.milestone}
         missionStatus={model.mission.status}
+        record={model.record}
         date={model.deck.date}
         elapsedDays={model.deck.elapsedDays}
         autosaveBoundary={autosaveBoundary}
@@ -131,11 +135,14 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
             <p>Orders remain in force until you change them.</p>
           </div>
           <div class="order-grid">
-            <label>Heading
-              <select value={model.deck.heading} onChange={(event) => controller.setHeading(event.currentTarget.value as typeof model.deck.heading)}>
-                {model.headings.map((heading) => <option key={heading} value={heading}>{heading}</option>)}
-              </select>
-            </label>
+            <HeadingRose
+              heading={model.deck.heading}
+              wind={model.deck.wind}
+              pointOfSail={model.deck.pointOfSail}
+              headings={model.headings}
+              onSelect={(heading) => controller.setHeading(heading)}
+            />
+            <div class="order-fields">
             <label>Sailing policy
               <select value={model.deck.sailingPolicy} onChange={(event) => controller.setSailingPolicy(event.currentTarget.value as typeof model.deck.sailingPolicy)}>
                 {model.sailingPolicies.map((policy) => <option key={policy} value={policy}>{titleCase(policy)}</option>)}
@@ -153,6 +160,7 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
                 <option value="objective_abandoned">Give up the Cape</option>
               </select>
             </label>
+            </div>
           </div>
           <div class="day-controls">
             <button class="primary primary-action" type="button" disabled={isAdvancing} onClick={() => void controller.advanceUntilInterrupted()}>
@@ -162,7 +170,7 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
             <button type="button" disabled={isAdvancing} aria-keyshortcuts="D" onClick={() => controller.advanceOneDay()}>Sail one day <kbd>D</kbd></button>
             <button type="button" disabled={isAdvancing || model.deck.observationReason !== null} onClick={() => controller.dispatchSimulation({ type: "observation_day" })}>
               Lie to and observe
-              <small>{model.deck.observationReason ?? `One day, no ground made. Sounds for a coast to fix east and west. ${model.deck.observationDaysSpent} spent so far.`}</small>
+              <small>{`${model.deck.observationReason ?? "One day, no ground made. Sounds and land signs fix east and west, and working the same ground again closes the band further."} ${model.deck.observationDaysSpent} spent so far.`}</small>
             </button>
             <button type="button" disabled={!isAdvancing} aria-keyshortcuts="Escape" onClick={() => controller.stopAdvance()}>Stop after this day</button>
           </div>

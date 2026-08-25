@@ -22,7 +22,50 @@ export const EVENT_TUNING = deepFreeze({
   minimumDailyChancePermille: 20,
   maximumDailyChancePermille: 1_000,
   eventPrngDomainSeparator: "::events:authored-journey-v1",
+  /**
+   * Unfinished work is the backlog of jobs put off rather than done. A branch that
+   * defers adds to it, a branch that spends a resource to finish the job removes
+   * from it, and every day it stands above the tolerance it wears crew and hull.
+   * This is what carries a careful expedition down towards the escalation gates:
+   * without it the cheap branch is free and the dangerous half of the catalogue
+   * can never become eligible.
+   */
+  unfinishedWork: {
+    maximum: 12,
+    /** A short list of outstanding jobs is normal seamanship and costs nothing. */
+    toleranceBeforeWear: 1,
+    /**
+     * A ship at sea generates work whether or not an event asks about it. Without
+     * this the backlog has no source the player cannot simply decline, and a
+     * well-outfitted expedition clears it to zero and coasts.
+     */
+    baselineAccrualDays: 10,
+    dailyCrewHealthWearBps: 4,
+    dailyCrewMoraleWearBps: 10,
+    dailyHullWearBps: 3,
+    pressureThreshold: 6,
+  },
 });
+
+/** True on the days a ship at sea adds a job to the list on its own account. */
+export function accruesBaselineUnfinishedWork(committedDay: number): boolean {
+  return committedDay > 0 && committedDay % EVENT_TUNING.unfinishedWork.baselineAccrualDays === 0;
+}
+
+/** Wear owed for a day carrying this much unfinished work. */
+export function unfinishedWorkWear(unfinishedWork: number): {
+  crewHealthBps: number;
+  crewMoraleBps: number;
+  hullBps: number;
+} {
+  const tuning = EVENT_TUNING.unfinishedWork;
+  const over = Math.max(0, Math.min(unfinishedWork, tuning.maximum) - tuning.toleranceBeforeWear);
+  return {
+    crewHealthBps: -over * tuning.dailyCrewHealthWearBps,
+    crewMoraleBps: -over * tuning.dailyCrewMoraleWearBps,
+    hullBps: -over * tuning.dailyHullWearBps,
+  };
+}
 
 function effects(value: EventEffects = {}): EventEffects {
   return value;
@@ -110,7 +153,7 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     traits: { delayed: true, remembered: true, preparationSoftened: true },
     choices: [
       choice("lower-and-batten", "Lower sail and batten down", "preparation", "The crew lowers sail and secures every opening before the weather arrives.", effects({ setFlags: ["storm_warned", "storm_prepared", "storm_drill_practised"], crewMoraleDeltaBps: -100 }), {}, stormFollowUp),
-      choice("press-before-weather", "Press on before it breaks", "objective", "The expedition holds its course, accepting a harsher encounter for distance made.", effects({ setFlags: ["storm_warned", "storm_pressed_on"], crewMoraleDeltaBps: -200 }), {}, stormFollowUp),
+      choice("press-before-weather", "Press on before it breaks", "objective", "The expedition holds its course, accepting a harsher encounter for distance made.", effects({ setFlags: ["storm_warned", "storm_pressed_on"], crewMoraleDeltaBps: -200, unfinishedWorkDelta: 1 }), {}, stormFollowUp),
     ],
   }),
   authoredEvent({
@@ -121,7 +164,7 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     hardGates: { weatherKinds: ["fair_clear", "overcast", "rough_heavy_swell"] },
     weightModifiers: [{ kind: "press_on", addWeight: 6 }],
     choices: [
-      choice("strike-sail", "Strike sail early", "days", "Sail is shortened; the squall passes with little harm but no useful progress.", effects({ crewMoraleDeltaBps: -100 })),
+      choice("strike-sail", "Strike sail early", "days", "Sail is shortened; the squall passes with little harm, no useful progress, and no work done on the standing jobs.", effects({ crewMoraleDeltaBps: -100, unfinishedWorkDelta: 1 })),
       choice("carry-sail", "Carry sail through it", "repair_capacity", "The caravel keeps way but the canvas takes the strain.", effects({ sailsDeltaBps: -500 })),
     ],
   }),
@@ -154,7 +197,7 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     hardGates: { weatherKinds: ["calm", "fair_clear"] },
     choices: [
       choice("wait-under-normal-rations", "Wait under normal rations", "stores", "The crew waits without further loss of confidence.", effects({ provisionsDeltaKg: -75, waterDeltaKg: -150 })),
-      choice("reduce-work", "Reduce work and conserve morale", "days", "Work is eased and the calm is endured without pretending progress.", effects({ crewMoraleDeltaBps: 100 })),
+      choice("reduce-work", "Reduce work and conserve morale", "days", "Work is eased and the calm is endured without pretending progress; the standing jobs wait another day.", effects({ crewMoraleDeltaBps: 100, unfinishedWorkDelta: 1 })),
     ],
   }),
   authoredEvent({
@@ -164,7 +207,7 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     logText: "The wind settles directly across the intended course.",
     weightModifiers: [{ kind: "cautious", addWeight: -2 }, { kind: "press_on", addWeight: 5 }],
     choices: [
-      choice("tack-patiently", "Tack patiently", "days", "The ship gives up time to preserve rig and crew.", effects({ crewMoraleDeltaBps: -100 })),
+      choice("tack-patiently", "Tack patiently", "days", "The ship gives up time to preserve rig and crew, and the hands work the sheets instead of the standing jobs.", effects({ crewMoraleDeltaBps: -100, unfinishedWorkDelta: 1 })),
       choice("force-the-course", "Force the course", "repair_capacity", "The course is held at the price of strained sails and rudder.", effects({ sailsDeltaBps: -300, rudderDeltaBps: -200 })),
     ],
   }),
@@ -177,9 +220,9 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     weightModifiers: [{ kind: "old_water", addWeight: 10 }],
     traits: { delayed: true },
     choices: [
-      choice("rehoop-cask", "Re-hoop and seal it", "repair_capacity", "Repair material and labour arrest the leak.", effects({ repairStoresDeltaKg: -100, setFlags: ["casks_repaired"] }), { minimumRepairStoresKg: 100 }),
+      choice("rehoop-cask", "Re-hoop and seal it", "repair_capacity", "Repair material and labour arrest the leak.", effects({ repairStoresDeltaKg: -100, unfinishedWorkDelta: -1, setFlags: ["casks_repaired"] }), { minimumRepairStoresKg: 100 }),
       choice("shift-water", "Shift what remains", "stores", "Most of the water is saved, but the damaged cask is left behind.", effects({ waterDeltaKg: -400 })),
-      choice("mark-and-watch", "Mark it and watch", "days", "The leak is watched rather than repaired; more water may be lost tomorrow.", effects({ setFlags: ["cask_leak_watched"] }), {}, [{ id: "leaking-cask-loss", dueAfterDays: 1, logText: "The watched cask leaks again overnight.", effects: effects({ waterDeltaKg: -800 }) }]),
+      choice("mark-and-watch", "Mark it and watch", "days", "The leak is watched rather than repaired; more water may be lost tomorrow.", effects({ unfinishedWorkDelta: 2, setFlags: ["cask_leak_watched"] }), {}, [{ id: "leaking-cask-loss", dueAfterDays: 1, logText: "The watched cask leaks again overnight.", effects: effects({ waterDeltaKg: -800 }) }]),
     ],
   }),
   authoredEvent({
@@ -191,7 +234,7 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     weightModifiers: [{ kind: "old_water", addWeight: 18 }],
     traits: { preparationSoftened: true, factProducing: true },
     choices: [
-      choice("treat-casks", "Treat the casks with medicine stores", "preparation", "The worst casks are treated and confidence steadies.", effects({ medicineDeltaKg: -100, crewHealthDeltaBps: 200, facts: [{ id: "fact.cask-treatment", type: "hazard", status: "observed", confidence: 45, source: "crew treatment", claim: "Old Atlantic water can be made less harmful with early treatment." }] }), { minimumMedicineKg: 100 }),
+      choice("treat-casks", "Treat the casks with medicine stores", "preparation", "The worst casks are treated and confidence steadies.", effects({ medicineDeltaKg: -100, crewHealthDeltaBps: 200, unfinishedWorkDelta: -1, facts: [{ id: "fact.cask-treatment", type: "hazard", status: "observed", confidence: 45, source: "crew treatment", claim: "Old Atlantic water can be made less harmful with early treatment." }] }), { minimumMedicineKg: 100 }),
       choice("issue-anyway", "Issue it anyway", "morale", "The ration is issued; morale and pooled health absorb the cost.", effects({ crewHealthDeltaBps: -300, crewMoraleDeltaBps: -400 })),
     ],
   }),
@@ -204,7 +247,7 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     weightModifiers: [{ kind: "old_water", addWeight: 3 }],
     traits: { remembered: true },
     choices: [
-      choice("discard-worst", "Discard the worst sacks", "stores", "The spoiled mass is thrown overboard before it spreads.", effects({ provisionsDeltaKg: -600, setFlags: ["stores_secured"] })),
+      choice("discard-worst", "Discard the worst sacks", "stores", "The spoiled mass is thrown overboard before it spreads.", effects({ provisionsDeltaKg: -600, unfinishedWorkDelta: -1, setFlags: ["stores_secured"] })),
       choice("stretch-the-lot", "Stretch the remaining lot", "morale", "Nothing is discarded, but health and morale suffer.", effects({ crewHealthDeltaBps: -350, crewMoraleDeltaBps: -250 })),
     ],
   }),
@@ -215,9 +258,9 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     logText: "Gnawed sacks and droppings reveal rats in the provision bay.",
     traits: { preparationSoftened: true },
     choices: [
-      choice("use-secured-bins", "Use the secured bins", "preparation", "Prepared bins contain the damage.", effects({ provisionsDeltaKg: -100 }), { requiredFlags: ["stores_secured"] }),
-      choice("hunt-and-clean", "Turn out the hold and hunt them", "days", "The crew spends exhausting effort clearing the hold and securing the bins.", effects({ crewMoraleDeltaBps: -200, setFlags: ["stores_secured"] })),
-      choice("accept-loss", "Accept the loss", "stores", "The rats keep the dark corners and take their share.", effects({ provisionsDeltaKg: -900 })),
+      choice("use-secured-bins", "Use the secured bins", "preparation", "Prepared bins contain the damage.", effects({ provisionsDeltaKg: -100, unfinishedWorkDelta: -1 }), { requiredFlags: ["stores_secured"] }),
+      choice("hunt-and-clean", "Turn out the hold and hunt them", "days", "The crew spends exhausting effort clearing the hold and securing the bins.", effects({ crewMoraleDeltaBps: -200, unfinishedWorkDelta: -1, setFlags: ["stores_secured"] })),
+      choice("accept-loss", "Accept the loss", "stores", "The rats keep the dark corners and take their share.", effects({ provisionsDeltaKg: -900, unfinishedWorkDelta: 1 })),
     ],
   }),
 
@@ -226,13 +269,18 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     category: "ship",
     title: "A Sprung Mast",
     logText: "The mast works visibly at the partners and opens a dangerous seam.",
-    weightModifiers: [{ kind: "damaged_ship", addWeight: 8 }, { kind: "press_on", addWeight: 6 }],
+    rememberedText: [{ minimumUnfinishedWork: 6, text: "The partners were on the list of jobs long before the seam opened." }],
+    weightModifiers: [
+      { kind: "damaged_ship", addWeight: 8 },
+      { kind: "press_on", addWeight: 6 },
+      { kind: "unfinished_work", addWeight: 6 },
+    ],
     warningStage: "warning",
-    traits: { delayed: true },
+    traits: { delayed: true, remembered: true },
     choices: [
-      choice("shore-with-stores", "Shore it with repair stores", "repair_capacity", "Timber and labour secure the mast before the seam grows.", effects({ repairStoresDeltaKg: -250, mastDeltaBps: 300, setFlags: ["mast_shored"] }), { minimumRepairStoresKg: 250 }),
-      choice("jury-rig", "Jury-rig and continue", "objective", "The mast is bound for now, with a later strain still owed.", effects({ mastDeltaBps: -300, setFlags: ["mast_jury_rigged"] }), {}, [{ id: "sprung-mast-settles", dueAfterDays: 3, logText: "The jury-rigged mast settles badly under continuing strain.", effects: effects({ mastDeltaBps: -500 }) }]),
-      choice("reduce-sail", "Reduce sail indefinitely", "days", "The rig is spared while the objective yields time.", effects({ crewMoraleDeltaBps: -200 })),
+      choice("shore-with-stores", "Shore it with repair stores", "repair_capacity", "Timber and labour secure the mast before the seam grows.", effects({ repairStoresDeltaKg: -250, mastDeltaBps: 300, unfinishedWorkDelta: -2, setFlags: ["mast_shored"] }), { minimumRepairStoresKg: 250 }),
+      choice("jury-rig", "Jury-rig and continue", "objective", "The mast is bound for now, with a later strain still owed.", effects({ mastDeltaBps: -300, unfinishedWorkDelta: 2, setFlags: ["mast_jury_rigged"] }), {}, [{ id: "sprung-mast-settles", dueAfterDays: 3, logText: "The jury-rigged mast settles badly under continuing strain.", effects: effects({ mastDeltaBps: -500 }) }]),
+      choice("reduce-sail", "Reduce sail indefinitely", "days", "The rig is spared while the objective yields time, and the seam is left exactly as it stands.", effects({ crewMoraleDeltaBps: -200, unfinishedWorkDelta: 1 })),
     ],
   }),
   authoredEvent({
@@ -242,7 +290,7 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     logText: "A split runs across the working canvas.",
     traits: { preparationSoftened: true },
     choices: [
-      choice("use-repair-kit", "Use the prepared repair kit", "preparation", "Prepared cloth and tools keep the tear small.", effects({ repairStoresDeltaKg: -150, sailsDeltaBps: 200 }), { minimumRepairStoresKg: 150 }),
+      choice("use-repair-kit", "Use the prepared repair kit", "preparation", "Prepared cloth and tools keep the tear small.", effects({ repairStoresDeltaKg: -150, sailsDeltaBps: 200, unfinishedWorkDelta: -1 }), { minimumRepairStoresKg: 150 }),
       choice("cut-away", "Cut away the damaged panel", "repair_capacity", "The sail remains usable but permanently reduced.", effects({ sailsDeltaBps: -500 })),
     ],
   }),
@@ -251,12 +299,17 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     category: "ship",
     title: "Rudder Strain",
     logText: "The tiller kicks and the rudder answers late.",
-    rememberedText: [{ requiredFlag: "rudder_watched", text: "The earlier watch catches the movement before the fastenings open." }],
-    weightModifiers: [{ kind: "damaged_ship", addWeight: 6 }],
-    traits: { remembered: true },
+    rememberedText: [
+      { requiredFlag: "rudder_watched", minimumUnfinishedWork: 6, text: "The watch has been kept for weeks now without anyone unshipping the rudder." },
+      { requiredFlag: "rudder_watched", text: "The earlier watch catches the movement before the fastenings open." },
+      { minimumUnfinishedWork: 6, text: "It joins a list of jobs the ship has been carrying for some time." },
+    ],
+    weightModifiers: [{ kind: "damaged_ship", addWeight: 6 }, { kind: "unfinished_work", addWeight: 6 }],
+    traits: { remembered: true, preparationSoftened: true },
     choices: [
-      choice("lash-and-watch", "Lash it and set a watch", "days", "The watch keeps the strain visible and buys time.", effects({ rudderDeltaBps: -200, setFlags: ["rudder_watched"] })),
-      choice("hold-heavy-tiller", "Hold the heavy tiller", "morale", "Extra hands preserve the course but tire the crew.", effects({ crewHealthDeltaBps: -200, crewMoraleDeltaBps: -100 })),
+      choice("rehang-rudder", "Unship and re-hang the rudder", "repair_capacity", "A hard day of work with timber and iron puts the fastenings right and clears the job from the list.", effects({ repairStoresDeltaKg: -200, rudderDeltaBps: 400, unfinishedWorkDelta: -2, clearFlags: ["rudder_watched"] }), { minimumRepairStoresKg: 200 }),
+      choice("lash-and-watch", "Lash it and set a watch", "days", "The watch keeps the strain visible and buys time, but the fastenings are not touched.", effects({ rudderDeltaBps: -200, unfinishedWorkDelta: 1, setFlags: ["rudder_watched"] })),
+      choice("hold-heavy-tiller", "Hold the heavy tiller", "morale", "Extra hands preserve the course but tire the crew, and the rudder is left as it is.", effects({ crewHealthDeltaBps: -200, crewMoraleDeltaBps: -100, unfinishedWorkDelta: 1 })),
     ],
   }),
   authoredEvent({
@@ -264,12 +317,14 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     category: "ship",
     title: "Hull Leak",
     logText: "The pumps bring more water than yesterday and the hull works below.",
-    hardGates: { maximumShipComponent: { component: "hull", bps: 7_500 } },
-    weightModifiers: [{ kind: "damaged_ship", addWeight: 12 }],
+    rememberedText: [{ minimumUnfinishedWork: 6, text: "The seams below were on the list of jobs and never came off it." }],
+    hardGates: { maximumShipComponent: { component: "hull", bps: 8_500 } },
+    weightModifiers: [{ kind: "damaged_ship", addWeight: 12 }, { kind: "unfinished_work", addWeight: 10 }],
     warningStage: "warning",
+    traits: { remembered: true },
     choices: [
-      choice("patch-with-stores", "Patch from inside", "repair_capacity", "Oakum and timber slow the ingress.", effects({ repairStoresDeltaKg: -300, hullDeltaBps: 500 }), { minimumRepairStoresKg: 300 }),
-      choice("man-pumps", "Man the pumps continuously", "morale", "The ship remains afloat while health and morale pay for the labour.", effects({ crewHealthDeltaBps: -300, crewMoraleDeltaBps: -300 })),
+      choice("patch-with-stores", "Patch from inside", "repair_capacity", "Oakum and timber slow the ingress.", effects({ repairStoresDeltaKg: -300, hullDeltaBps: 500, unfinishedWorkDelta: -2 }), { minimumRepairStoresKg: 300 }),
+      choice("man-pumps", "Man the pumps continuously", "morale", "The ship stays afloat while health and morale pay for the labour, but nobody ever gets at the hull itself.", effects({ crewHealthDeltaBps: -300, crewMoraleDeltaBps: -300, unfinishedWorkDelta: 1 })),
       choice("abandon-objective", "Abandon the expedition at the anchorage", "objective", "The current run ends in authored abandonment without claiming that the crew died.", effects({ abandonObjective: true, terminalReason: "authored_abandonment", setFlags: ["hull_leak_abandonment"] })),
     ],
   }),
@@ -279,13 +334,18 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     category: "crew",
     title: "Fatigue in the Watches",
     logText: "Hands miss calls and sleep against the rail; sickness pressure is now visible.",
-    hardGates: { maximumHealthBps: 8_500 },
-    weightModifiers: [{ kind: "low_health", addWeight: 10 }, { kind: "press_on", addWeight: 5 }],
+    rememberedText: [{ minimumUnfinishedWork: 6, text: "The standing list of unfinished jobs has been eating the watch below for weeks." }],
+    hardGates: { maximumHealthBps: 9_000 },
+    weightModifiers: [
+      { kind: "low_health", addWeight: 10 },
+      { kind: "press_on", addWeight: 5 },
+      { kind: "unfinished_work", addWeight: 8 },
+    ],
     warningStage: "warning",
-    traits: { delayed: true },
+    traits: { delayed: true, remembered: true },
     choices: [
-      choice("ease-watches", "Ease the watches", "days", "Work is reduced before fatigue becomes sickness.", effects({ crewMoraleDeltaBps: 200, setFlags: ["fatigue_warning_heeded"] })),
-      choice("keep-full-watches", "Keep full watches", "objective", "The expedition keeps its pace and accepts a later health consequence.", effects({ setFlags: ["fatigue_warning_ignored"] }), {}, [{ id: "fatigue-sickness", dueAfterDays: 2, logText: "The warned fatigue has developed into severe weakness among the hands.", effects: effects({ crewHealthDeltaBps: -600, ableCrewDelta: -1, setFlags: ["sickness_warned"] }), followUpEventId: "crew.scurvy-symptoms" }]),
+      choice("ease-watches", "Ease the watches", "days", "Work is reduced before fatigue becomes sickness.", effects({ crewMoraleDeltaBps: 200, unfinishedWorkDelta: -1, setFlags: ["fatigue_warning_heeded"] })),
+      choice("keep-full-watches", "Keep full watches", "objective", "The expedition keeps its pace and accepts a later health consequence.", effects({ unfinishedWorkDelta: 2, setFlags: ["fatigue_warning_ignored"] }), {}, [{ id: "fatigue-sickness", dueAfterDays: 2, logText: "The warned fatigue has developed into severe weakness among the hands.", effects: effects({ crewHealthDeltaBps: -600, ableCrewDelta: -1, setFlags: ["sickness_warned"] }), followUpEventId: "crew.scurvy-symptoms" }]),
     ],
   }),
   authoredEvent({
@@ -295,8 +355,8 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     logText: "A hand is thrown against the rail and cannot return to the watch.",
     traits: { preparationSoftened: true },
     choices: [
-      choice("use-medicine", "Use medicine and rest the injured", "preparation", "Medicine and reduced duty prevent the injury worsening.", effects({ medicineDeltaKg: -100, ableCrewDelta: -1, crewHealthDeltaBps: -100 }), { minimumMedicineKg: 100 }),
-      choice("bind-and-return", "Bind the injury and return the hand", "morale", "The hand returns too soon; pooled health and morale absorb the decision.", effects({ crewHealthDeltaBps: -350, crewMoraleDeltaBps: -200 })),
+      choice("use-medicine", "Use medicine and rest the injured", "preparation", "Medicine and reduced duty prevent the injury worsening.", effects({ medicineDeltaKg: -100, ableCrewDelta: -1, crewHealthDeltaBps: -100, unfinishedWorkDelta: -1 }), { minimumMedicineKg: 100 }),
+      choice("bind-and-return", "Bind the injury and return the hand", "morale", "The hand returns too soon; pooled health and morale absorb the decision, and a short watch stays short.", effects({ crewHealthDeltaBps: -350, crewMoraleDeltaBps: -200, unfinishedWorkDelta: 1 })),
     ],
   }),
   authoredEvent({
@@ -309,9 +369,9 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     warningStage: "threat",
     traits: { remembered: true, preparationSoftened: true },
     choices: [
-      choice("medicine-and-rest", "Use medicine and rest", "preparation", "Medicine and rest soften the warned sickness.", effects({ medicineDeltaKg: -200, crewHealthDeltaBps: 300, clearFlags: ["sickness_warned"] }), { minimumMedicineKg: 200 }),
-      choice("search-fresh-food", "Sacrifice time to seek fresh food", "objective", "The objective yields time while symptoms stabilise.", effects({ provisionsDeltaKg: -300, crewMoraleDeltaBps: 100, clearFlags: ["sickness_warned"] })),
-      choice("continue-duty", "Continue full duty", "morale", "The warned sickness deepens under full duty.", effects({ crewHealthDeltaBps: -700, ableCrewDelta: -2, crewMoraleDeltaBps: -300, clearFlags: ["sickness_warned"] })),
+      choice("medicine-and-rest", "Use medicine and rest", "preparation", "Medicine and rest soften the warned sickness.", effects({ medicineDeltaKg: -200, crewHealthDeltaBps: 300, unfinishedWorkDelta: -2, clearFlags: ["sickness_warned"] }), { minimumMedicineKg: 200 }),
+      choice("search-fresh-food", "Sacrifice time to seek fresh food", "objective", "The objective yields time while symptoms stabilise.", effects({ provisionsDeltaKg: -300, crewMoraleDeltaBps: 100, unfinishedWorkDelta: -1, clearFlags: ["sickness_warned"] })),
+      choice("continue-duty", "Continue full duty", "morale", "The warned sickness deepens under full duty.", effects({ crewHealthDeltaBps: -700, ableCrewDelta: -2, crewMoraleDeltaBps: -300, unfinishedWorkDelta: 2, clearFlags: ["sickness_warned"] })),
     ],
   }),
   authoredEvent({
@@ -319,13 +379,15 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     category: "crew",
     title: "Grumbling Below",
     logText: "Complaints about distance, stores, and the captain are no longer private.",
-    hardGates: { maximumMoraleBps: 4_500, forbiddenFlags: ["mutiny_grumbling"] },
+    rememberedText: [{ minimumUnfinishedWork: 6, text: "The hands can recite the list of jobs that were promised and never done." }],
+    hardGates: { maximumMoraleBps: 5_000, forbiddenFlags: ["mutiny_grumbling"] },
+    weightModifiers: [{ kind: "unfinished_work", addWeight: 12 }],
     warningStage: "warning",
-    traits: { delayed: true },
+    traits: { delayed: true, remembered: true },
     choices: [
       choice("full-ration", "Issue a full extra ration", "stores", "A costly extra issue quiets the loudest complaints for now.", effects({ provisionsDeltaKg: -500, waterDeltaKg: -500, crewMoraleDeltaBps: 500, setFlags: ["mutiny_grumbling", "mutiny_rations_spent"] }), { minimumProvisionsKg: 500, minimumWaterKg: 500 }),
       choice("hear-complaints", "Hear the complaints openly", "days", "The captain hears the crew, but a formal petition will follow.", effects({ crewMoraleDeltaBps: 100, setFlags: ["mutiny_grumbling"] }), {}, [{ id: "mutiny-petition", dueAfterDays: 1, logText: "The warned grumbling has become a formal petition.", effects: effects({ setFlags: ["mutiny_petition_due"] }), followUpEventId: "crew.petition" }]),
-      choice("dismiss-grumbling", "Dismiss the grumbling", "morale", "The complaints are dismissed and harden into organisation.", effects({ crewMoraleDeltaBps: -300, setFlags: ["mutiny_grumbling"] }), {}, [{ id: "mutiny-petition-dismissed", dueAfterDays: 1, logText: "Dismissed complaints return as a signed petition.", effects: effects({ setFlags: ["mutiny_petition_due"] }), followUpEventId: "crew.petition" }]),
+      choice("dismiss-grumbling", "Dismiss the grumbling", "morale", "The complaints are dismissed and harden into organisation.", effects({ crewMoraleDeltaBps: -300, unfinishedWorkDelta: 1, setFlags: ["mutiny_grumbling"] }), {}, [{ id: "mutiny-petition-dismissed", dueAfterDays: 1, logText: "Dismissed complaints return as a signed petition.", effects: effects({ setFlags: ["mutiny_petition_due"] }), followUpEventId: "crew.petition" }]),
     ],
   }),
   authoredEvent({
@@ -381,8 +443,8 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     oncePerLeg: true,
     traits: { factProducing: true },
     choices: [
-      choice("record-current", "Record a current hypothesis", "days", "The discrepancy is entered as current-expedition evidence, not hidden truth.", effects({ facts: [{ id: "fact.south-atlantic-current-hypothesis", type: "current", status: "observed", confidence: 40, source: "dead-reckoning discrepancy", claim: "A sustained current may set the ship eastward in the South Atlantic." }] })),
-      choice("trust-reckoning", "Trust the reckoning", "objective", "The discrepancy is left unresolved to preserve the present plan.", effects({ crewMoraleDeltaBps: -100, setFlags: ["current_discrepancy_ignored"] })),
+      choice("record-current", "Record a current hypothesis", "days", "The discrepancy is entered as current-expedition evidence, not hidden truth, at the price of a day of ship's work.", effects({ unfinishedWorkDelta: 1, facts: [{ id: "fact.south-atlantic-current-hypothesis", type: "current", status: "observed", confidence: 40, source: "dead-reckoning discrepancy", claim: "A sustained current may set the ship eastward in the South Atlantic." }] })),
+      choice("trust-reckoning", "Trust the reckoning", "objective", "The discrepancy is left unresolved to preserve the present plan.", effects({ crewMoraleDeltaBps: -100, unfinishedWorkDelta: 1, setFlags: ["current_discrepancy_ignored"] })),
     ],
   }),
   authoredEvent({
@@ -394,7 +456,7 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     oncePerLeg: true,
     traits: { factProducing: true },
     choices: [
-      choice("record-signs", "Record the signs of land", "days", "The signs become a current-expedition coastal cue.", effects({ facts: [{ id: "fact.southern-land-signs", type: "landmark", status: "observed", confidence: 45, source: "birds and vegetation", claim: "Land signs were observed in the southern Atlantic." }] })),
+      choice("record-signs", "Record the signs of land", "days", "The signs become a current-expedition coastal cue, bought with a day of ship's work.", effects({ unfinishedWorkDelta: 1, facts: [{ id: "fact.southern-land-signs", type: "landmark", status: "observed", confidence: 45, source: "birds and vegetation", claim: "Land signs were observed in the southern Atlantic." }] })),
       choice("follow-birds", "Follow the birds", "objective", "The expedition spends objective time following uncertain signs.", effects({ waterDeltaKg: -150, provisionsDeltaKg: -75, setFlags: ["followed_land_birds"] })),
     ],
   }),
@@ -409,7 +471,7 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     traits: { delayed: true, remembered: true, factProducing: true },
     choices: [
       choice("investigate-bank", "Investigate the bank", "stores", "The expedition spends stores testing the claim rather than rolling a free misfortune.", effects({ waterDeltaKg: -300, provisionsDeltaKg: -150, setFlags: ["false_land_investigated"] }), {}, [{ id: "false-land-clears", dueAfterDays: 1, logText: "The bank clears without land; the carried rumour is marked disproved.", effects: effects({ facts: [{ id: "fact.cape-verde-false-island", type: "rumour", status: "disproved", confidence: 80, source: "direct investigation", claim: "The rumoured island west of the route was not found." }] }) }]),
-      choice("hold-course", "Hold the planned course", "objective", "The uncertain bank is left untested to preserve the objective.", effects({ crewMoraleDeltaBps: -100 })),
+      choice("hold-course", "Hold the planned course", "objective", "The uncertain bank is left untested to preserve the objective, and the question is left open.", effects({ crewMoraleDeltaBps: -100, unfinishedWorkDelta: 1 })),
     ],
   }),
   authoredEvent({
@@ -421,9 +483,9 @@ export const AUTHORED_EVENTS: readonly EventDefinition[] = deepFreeze([
     oncePerLeg: true,
     traits: { preparationSoftened: true, factProducing: true },
     choices: [
-      choice("sound-and-record", "Sound and record it", "days", "Careful soundings establish a current-expedition anchorage fact.", effects({ facts: [{ id: "fact.unknown-southern-anchorage", type: "anchorage", status: "observed", confidence: 55, source: "lead-line survey", claim: "A sheltered southern anchorage has usable holding ground." }] })),
-      choice("use-repair-stores", "Anchor and make prepared repairs", "preparation", "Repair capacity is spent while shelter softens the work.", effects({ repairStoresDeltaKg: -250, hullDeltaBps: 300, mastDeltaBps: 200, setFlags: ["anchorage_used"] }), { minimumRepairStoresKg: 250 }),
-      choice("decline-anchorage", "Decline the uncertain anchorage", "objective", "The expedition preserves time and accepts the unresolved opportunity.", effects({ crewMoraleDeltaBps: -100 })),
+      choice("sound-and-record", "Sound and record it", "days", "Careful soundings establish a current-expedition anchorage fact while the standing jobs wait.", effects({ unfinishedWorkDelta: 1, facts: [{ id: "fact.unknown-southern-anchorage", type: "anchorage", status: "observed", confidence: 55, source: "lead-line survey", claim: "A sheltered southern anchorage has usable holding ground." }] })),
+      choice("use-repair-stores", "Anchor and make prepared repairs", "preparation", "Repair capacity is spent while shelter softens the work.", effects({ repairStoresDeltaKg: -250, hullDeltaBps: 300, mastDeltaBps: 200, unfinishedWorkDelta: -3, setFlags: ["anchorage_used"] }), { minimumRepairStoresKg: 250 }),
+      choice("decline-anchorage", "Decline the uncertain anchorage", "objective", "The expedition preserves time and accepts the unresolved opportunity; every outstanding job stays outstanding.", effects({ crewMoraleDeltaBps: -100, unfinishedWorkDelta: 1 })),
     ],
   }),
 ]);
@@ -435,6 +497,8 @@ export interface EventCatalogueStats {
   readonly remembered: number;
   readonly preparationSoftened: number;
   readonly factProducing: number;
+  readonly accruesUnfinishedWork: number;
+  readonly clearsUnfinishedWork: number;
 }
 
 export function validateEventCatalogue(
@@ -469,7 +533,7 @@ export function validateEventCatalogue(
     if (!event.choices.some((eventChoice) => eventChoice.mitigationResource !== undefined)) {
       throw new Error(`${event.id} has no spendable mitigation option`);
     }
-    const alwaysLegal = event.choices.some((eventChoice) => {
+    const unconditional = event.choices.filter((eventChoice) => {
       const requirement = eventChoice.requirement;
       return requirement.minimumMoneyDucats === undefined
         && requirement.minimumWaterKg === undefined
@@ -484,7 +548,36 @@ export function validateEventCatalogue(
         && (eventChoice.effects.repairStoresDeltaKg ?? 0) >= 0
         && (eventChoice.effects.medicineDeltaKg ?? 0) >= 0;
     });
-    if (!alwaysLegal) throw new Error(`${event.id} has no always-legal mitigation for a depleted expedition`);
+    if (unconditional.length === 0) {
+      throw new Error(`${event.id} has no always-legal mitigation for a depleted expedition`);
+    }
+    // Section 22.2: a death spiral must stay escapable, but not for free. An
+    // unconditional branch that spends no store must at least add to the backlog,
+    // or a careful expedition can take it every time and never feel any pressure.
+    const freeEscape = unconditional.find((eventChoice) => {
+      const spent = -(
+        (eventChoice.effects.crewHealthDeltaBps ?? 0)
+        + (eventChoice.effects.crewMoraleDeltaBps ?? 0)
+        + (eventChoice.effects.hullDeltaBps ?? 0)
+        + (eventChoice.effects.mastDeltaBps ?? 0)
+        + (eventChoice.effects.sailsDeltaBps ?? 0)
+        + (eventChoice.effects.rudderDeltaBps ?? 0)
+      );
+      // Either the branch defers work onto the backlog, or it is the labour that
+      // takes work off it. Both are a price. Neither is free.
+      const movesTheBacklog = (eventChoice.effects.unfinishedWorkDelta ?? 0) !== 0;
+      const endsTheRun = eventChoice.effects.abandonObjective === true
+        || eventChoice.effects.terminalReason !== undefined;
+      // A branch that schedules a consequence has not escaped anything yet; the
+      // price is owed rather than waived.
+      const owesLater = (eventChoice.delayed?.length ?? 0) > 0;
+      return spent < 200 && !movesTheBacklog && !endsTheRun && !owesLater;
+    });
+    if (freeEscape !== undefined) {
+      throw new Error(
+        `${event.id}.${freeEscape.id} is an unconditional escape that costs nothing and defers nothing`,
+      );
+    }
     if (event.warningStage === "terminal") {
       if ((event.hardGates.requiredFlags?.length ?? 0) === 0) {
         throw new Error(`${event.id} can terminate without a prior warning flag`);
@@ -524,9 +617,16 @@ export function validateEventCatalogue(
     remembered: catalogue.filter((event) => event.traits.remembered).length,
     preparationSoftened: catalogue.filter((event) => event.traits.preparationSoftened).length,
     factProducing: catalogue.filter((event) => event.traits.factProducing).length,
+    accruesUnfinishedWork: catalogue.filter((event) => event.choices
+      .some((item) => (item.effects.unfinishedWorkDelta ?? 0) > 0)).length,
+    clearsUnfinishedWork: catalogue.filter((event) => event.choices
+      .some((item) => (item.effects.unfinishedWorkDelta ?? 0) < 0)).length,
   };
   if (stats.delayed < 4 || stats.remembered < 4 || stats.preparationSoftened < 4 || stats.factProducing < 3) {
     throw new Error("authored catalogue does not satisfy the WP3 content quotas");
+  }
+  if (stats.accruesUnfinishedWork < 8 || stats.clearsUnfinishedWork < 8) {
+    throw new Error("authored catalogue does not give unfinished work enough sources and sinks");
   }
   return deepFreeze(stats);
 }
@@ -582,6 +682,10 @@ function passesHardGates(state: Readonly<JourneySimulationState>, event: Readonl
   if (gates.maximumHealthBps !== undefined && state.crew.healthBps > gates.maximumHealthBps) return false;
   if (gates.minimumCommittedDay !== undefined && state.committedDay < gates.minimumCommittedDay) return false;
   if (
+    gates.minimumUnfinishedWork !== undefined
+    && state.journey.unfinishedWork < gates.minimumUnfinishedWork
+  ) return false;
+  if (
     gates.maximumShipComponent !== undefined
     && componentCondition(state.ship, gates.maximumShipComponent.component) > gates.maximumShipComponent.bps
   ) return false;
@@ -597,6 +701,7 @@ function modifierApplies(state: Readonly<JourneySimulationState>, modifier: Read
     case "low_health": return state.crew.healthBps <= 6_000;
     case "damaged_ship": return (["hull", "mast", "sails", "rudder"] as ShipComponent[])
       .some((component) => componentCondition(state.ship, component) <= 7_500);
+    case "unfinished_work": return state.journey.unfinishedWork >= EVENT_TUNING.unfinishedWork.pressureThreshold;
     case "prepared_flag": return modifier.flag !== undefined && hasFlag(state, modifier.flag);
   }
 }
@@ -636,7 +741,13 @@ export function dailyEventChancePermille(state: Readonly<JourneySimulationState>
 }
 
 export function eventText(state: Readonly<JourneySimulationState>, event: Readonly<EventDefinition>): string {
-  const remembered = event.rememberedText.find((item) => hasFlag(state, item.requiredFlag));
+  const remembered = event.rememberedText.find((item) => (
+    (item.requiredFlag === undefined || hasFlag(state, item.requiredFlag))
+    && (
+      item.minimumUnfinishedWork === undefined
+      || state.journey.unfinishedWork >= item.minimumUnfinishedWork
+    )
+  ));
   return remembered === undefined ? event.logText : `${event.logText} ${remembered.text}`;
 }
 

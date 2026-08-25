@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 export const APP_ID = "age-of-exploration";
 export const LAUNCHER_PROTOCOL = 1;
-export const CONTENT_VERSION = "base-game-v2";
+export const CONTENT_VERSION = "base-game-v3";
 export const HEALTH_PATH = "/__age-of-exploration/health";
 
 const BUILD_MANIFEST_FORMAT = "age-of-exploration-launcher-build-v1";
@@ -201,6 +201,21 @@ export async function verifyProductionBundle(repositoryRoot) {
     throw new LauncherError("The production build is missing its JavaScript or stylesheet assets.");
   }
 
+  // Vite copies public/ into the build. A missing icon is not a broken game,
+  // but it is silent - the tab falls back to a blank page glyph and looks the
+  // same as a game that never had one - so the build says so instead.
+  let icon;
+  try {
+    icon = await fs.readFile(join(appDirectory, "favicon.ico"));
+  } catch {
+    throw new LauncherError(
+      "The production build has no favicon.ico. Run: node scripts/make-icon.mjs",
+    );
+  }
+  if (icon.length < 6 || icon.readUInt16LE(0) !== 0 || icon.readUInt16LE(2) !== 1) {
+    throw new LauncherError("The production build's favicon.ico is not an icon file.");
+  }
+
   for (const asset of assets.filter((file) => file.endsWith(".js"))) {
     const source = await fs.readFile(join(appDirectory, asset), "utf8");
     for (const marker of FORBIDDEN_PRODUCTION_MARKERS) {
@@ -373,24 +388,63 @@ export async function probeLauncher(gameUrl, expectedBuildId) {
   return { kind: "foreign" };
 }
 
-function openBrowser() {
+// Not `cmd /c start "" <url>`, which is the usual way to do this and does not
+// work here. Given a URL it opens nothing, never returns, and leaves the cmd
+// running - so every launch that reached this point left another dead shell
+// behind and the player went and typed the address by hand. It behaves the same
+// whether the child is detached or attached, so the console it was given is not
+// what decides it.
+//
+// url.dll,FileProtocolHandler is the shell's own URL opener, the one `start`
+// reaches by a longer route. It hands the URL to the default browser and exits,
+// in about a fifth of a second.
+export function browserOpenerCommand(gameUrl) {
+  return { arguments_: ["url.dll,FileProtocolHandler", gameUrl], command: "rundll32.exe" };
+}
+
+// Waited on, not fired and forgotten. When the game is already running this
+// launcher has nothing else to do and exits immediately afterwards - so an
+// opener that has not finished its handoff goes down with the console, and the
+// most ordinary case of all, "it is already up, just show it to me", is the one
+// that silently opens nothing. The timeout is there so that an opener which
+// hangs the way `start` does costs five seconds and a printed URL rather than
+// the game.
+async function openBrowser() {
   if (SKIP_BROWSER) {
     console.log(`Game ready at ${GAME_URL} (browser opening skipped for verification).`);
     return;
   }
 
-  try {
-    const opener = spawn(COMMAND_SHELL, ["/d", "/s", "/c", `start "" "${GAME_URL}"`], {
-      cwd: REPOSITORY_ROOT,
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    opener.on("error", () => console.log(`Open ${GAME_URL} in your browser.`));
-    opener.unref();
-  } catch {
-    console.log(`Open ${GAME_URL} in your browser.`);
-  }
+  const { arguments_, command } = browserOpenerCommand(GAME_URL);
+  const opened = await new Promise((resolveOpen) => {
+    let opener;
+    try {
+      opener = spawn(command, arguments_, {
+        cwd: REPOSITORY_ROOT,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } catch {
+      resolveOpen(false);
+      return;
+    }
+    // Unreferenced only once waiting has been given up on: an opener released
+    // from the event loop before it exits settles nothing, and Node ends the
+    // run on an unfinished await instead - which opened the tab and then
+    // reported the launch as a failure.
+    const giveUp = setTimeout(() => {
+      opener.unref();
+      resolveOpen(false);
+    }, 5_000);
+    const settle = (value) => {
+      clearTimeout(giveUp);
+      resolveOpen(value);
+    };
+    opener.once("error", () => settle(false));
+    opener.once("exit", (code) => settle(code === 0));
+  });
+
+  if (!opened) console.log(`Open ${GAME_URL} in your browser.`);
 }
 
 async function expectedPnpmVersion(repositoryRoot) {
@@ -458,7 +512,7 @@ async function main() {
   const running = await probeLauncher(GAME_URL, desiredBuildId);
   if (running.kind === "current") {
     console.log(`Age of Exploration is already running at ${GAME_URL}`);
-    openBrowser();
+    await openBrowser();
     return;
   }
   if (running.kind === "stale") {
@@ -513,7 +567,7 @@ async function main() {
     throw new LauncherError("The local server started but failed its application identity check.");
   }
 
-  openBrowser();
+  await openBrowser();
   console.log("Keep this window open while playing. Close it or press Ctrl+C to stop the game.");
 
   let stopping = false;

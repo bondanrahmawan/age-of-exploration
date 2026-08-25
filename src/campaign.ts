@@ -65,6 +65,17 @@ import {
 
 const DEFAULT_CAMPAIGN_DATE = "1488-04-01";
 const DEFAULT_EVENT_CHANCE_PERMILLE = 120;
+/** The ceiling word of mouth can put on a finding whose ship never came home. */
+const SALVAGED_LOG_CONFIDENCE_CAP = 40;
+/**
+ * The higher ceiling for a finding a completed landmark survey produced. Two deliberate days
+ * spent on a landmark the crew positively identified is a better class of claim than weed and
+ * birds, and comes home worth more when the ship does not. Still short of 70, so a survey no
+ * ship carried home can no more correct the reckoning by itself than any other salvage can.
+ */
+const SURVEYED_LANDMARK_SALVAGE_CONFIDENCE_CAP = 65;
+/** §34.10 confidence bands: usable for player judgement at 40, automatic correction at 70. */
+const OBSERVED_CONFIDENCE_FLOOR = 40;
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
 
 function canonicalCopy<T>(value: Readonly<T>): T {
@@ -416,28 +427,40 @@ function campaignTypeForJourneyFact(fact: Readonly<JourneyFact>): CampaignFactTy
   return fact.type;
 }
 
+/**
+ * The campaign fact a journey finding lands on. Two authored journey facts are restatements
+ * of standing campaign claims rather than new ones, so they merge into the existing record
+ * instead of sitting beside it under a second ID.
+ */
+function campaignFactIdForJourneyFactId(journeyFactId: string): string {
+  if (journeyFactId === "fact.south-atlantic-current-hypothesis") return SOUTH_ATLANTIC_CURRENT_ID;
+  if (journeyFactId === "fact.cape-landmark-survey") return LANDMARK_IDS.capeGoal;
+  return journeyFactId;
+}
+
 function mappedJourneyClaim(fact: Readonly<JourneyFact>): {
   readonly id: string;
   readonly claimedValue: CampaignClaimedValue;
   readonly location: string;
 } {
-  if (fact.id === "fact.south-atlantic-current-hypothesis") {
+  const id = campaignFactIdForJourneyFactId(fact.id);
+  if (id === SOUTH_ATLANTIC_CURRENT_ID) {
     return {
-      id: SOUTH_ATLANTIC_CURRENT_ID,
+      id,
       claimedValue: { kind: "current_vector", vectorMnmPerDay: { ...SOUTH_ATLANTIC_CURRENT.vectorMnmPerDay } },
       location: "South Atlantic current region",
     };
   }
-  if (fact.id === "fact.cape-landmark-survey") {
+  if (id === LANDMARK_IDS.capeGoal) {
     const cape = LANDMARKS.find((item) => item.id === LANDMARK_IDS.capeGoal)!;
     return {
-      id: LANDMARK_IDS.capeGoal,
+      id,
       claimedValue: { kind: "position", position: { ...cape.centre } },
       location: "broad Cape goal region",
     };
   }
   return {
-    id: fact.id,
+    id,
     claimedValue: { kind: "statement", text: fact.claim },
     location: locationForJourneyFact(fact),
   };
@@ -657,12 +680,20 @@ function currentDiscrepancyFacts(active: Readonly<ActiveExpedition>): readonly C
   return result;
 }
 
-function observedFacts(active: Readonly<ActiveExpedition>): readonly CampaignFact[] {
+/**
+ * What the crew has actually written down: journey facts and the navigation knowledge this
+ * expedition changed. The hidden-trace current derivation is deliberately absent, so this
+ * set is safe to count in front of the player while the voyage is still running.
+ */
+function loggedFacts(active: Readonly<ActiveExpedition>): readonly CampaignFact[] {
   return mergeCampaignFacts([
     ...active.journey.journey.facts.map((fact) => journeyFactToCampaignFact(fact, active.runNumber)),
     ...navigationObservationFacts(active),
-    ...currentDiscrepancyFacts(active),
   ]);
+}
+
+function observedFacts(active: Readonly<ActiveExpedition>): readonly CampaignFact[] {
+  return mergeCampaignFacts([...loggedFacts(active), ...currentDiscrepancyFacts(active)]);
 }
 
 function carriedFacts(active: Readonly<ActiveExpedition>): readonly CampaignFact[] {
@@ -819,16 +850,18 @@ function campaignOutcome(active: Readonly<ActiveExpedition>): { outcome: Campaig
   if (journeyOutcome === null) throw new SimulationValidationError("the active expedition has not reached a terminal outcome");
   if (journeyOutcome.id === "full_success") return { outcome: "full_success", reason: journeyOutcome.reason };
   if (journeyOutcome.id === "partial_return") return { outcome: "partial_return", reason: journeyOutcome.reason };
-  const shipLost = active.journey.survival.status.kind === "terminal"
-    && active.journey.survival.status.reason === "ship_lost";
+  // Any terminal loss, not hull failure alone: thirst, starvation and scurvy all end an
+  // expedition through crew health, and a report ashore proves as much for a crew that died
+  // of thirst as for one that went down with the hull.
+  const expeditionLost = active.journey.survival.status.kind === "terminal";
   if (
-    shipLost
+    expeditionLost
     && active.journey.journey.objectiveAchieved
     && active.reportSnapshot?.objectiveAchieved === true
   ) {
     return {
       outcome: "report_success",
-      reason: "The Cape was recognised, the later Cape Verde snapshot proved it, and the ship was subsequently lost.",
+      reason: "The Cape was recognised, the later Cape Verde snapshot proved it, and the expedition was subsequently lost.",
     };
   }
   return { outcome: "objective_failure", reason: journeyOutcome.reason };
@@ -848,6 +881,61 @@ function factsWithEvidenceOutside(
       ? []
       : [aggregateFact(fact.id, fact.type, fact.locationOrRegion, lostEvidence)];
   });
+}
+
+/**
+ * The campaign facts a completed landmark survey produced on this expedition. Provenance is
+ * read off the authored survey activity in the journey log rather than off a source string,
+ * so a finding qualifies for the survey salvage tier only where the crew reached a landmark,
+ * recognised it, and actually spent both days on it. An abandoned survey qualifies nothing.
+ */
+function surveyedLandmarkFactIds(active: Readonly<ActiveExpedition>): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const entry of active.journey.canonicalLog) {
+    if (entry.type !== "journey_day" || entry.activity.kind !== "cape_survey") continue;
+    if (!entry.activity.completed) continue;
+    for (const factId of entry.activity.factsLearned) ids.add(campaignFactIdForJourneyFactId(factId));
+  }
+  return ids;
+}
+
+/**
+ * What word of a lost expedition reaches Lisbon. Evidence no deposited copy holds is not
+ * struck off with the ship: it is entered at its own confidence or the salvage cap,
+ * whichever is lower, so a Cape seen once and lost leaves the next voyage somewhere to
+ * steer for instead of nothing. Findings a completed landmark survey produced carry the
+ * higher survey cap, because two days spent on a landmark the crew positively identified
+ * is a better class of claim than weed and birds; everything else carries the ordinary cap.
+ * Both sit below the 70 that automatic navigation correction needs, so salvaged evidence
+ * still never on its own confirms a fact or completes the run objective.
+ * A claim the expedition disproved stays disproved rather than softening into a rumour.
+ * Word reaches Lisbon once per finding, not once per sighting, so repeated sightings inside
+ * one lost run cannot corroborate each other past the cap.
+ */
+function salvagedFacts(
+  facts: readonly Readonly<CampaignFact>[],
+  runNumber: number,
+  reportedDate: string,
+  surveyedFactIds: ReadonlySet<string>,
+): readonly CampaignFact[] {
+  return mergeCampaignFacts(facts.map((fact) => {
+    const cap = surveyedFactIds.has(fact.id)
+      ? SURVEYED_LANDMARK_SALVAGE_CONFIDENCE_CAP
+      : SALVAGED_LOG_CONFIDENCE_CAP;
+    const confidence = Math.min(fact.confidence, cap);
+    return oneEvidenceFact(fact.id, fact.type, fact.locationOrRegion, {
+      evidenceId: `run.${String(runNumber).padStart(6, "0")}.salvaged.${fact.id}`,
+      runNumber,
+      claimedValue: canonicalCopy<CampaignClaimedValue>(fact.claimedValue),
+      source: `${fact.source}, salvaged from a lost expedition`,
+      confidence,
+      observedDate: fact.observedDate,
+      reportedDate,
+      status: fact.status === "disproved"
+        ? "disproved"
+        : confidence >= OBSERVED_CONFIDENCE_FLOOR ? "observed" : "rumoured",
+    });
+  }));
 }
 
 function factChanges(
@@ -878,7 +966,7 @@ function reportSupportingCurrent(facts: readonly Readonly<CampaignFact>[]): Camp
   return facts.find((fact) => fact.id === SOUTH_ATLANTIC_CURRENT_ID
     && fact.type === "current"
     && fact.status !== "disproved"
-    && fact.confidence >= 40
+    && fact.confidence >= OBSERVED_CONFIDENCE_FLOOR
     && fact.claimedValue.kind === "current_vector");
 }
 
@@ -889,6 +977,7 @@ function buildAfterActionReport(
   observed: readonly Readonly<CampaignFact>[],
   reported: readonly Readonly<CampaignFact>[],
   lost: readonly Readonly<CampaignFact>[],
+  salvaged: readonly Readonly<CampaignFact>[],
   changes: readonly Readonly<CampaignFactChange>[],
   campaignFactsAfter: readonly Readonly<CampaignFact>[],
 ): AfterActionReport {
@@ -913,6 +1002,7 @@ function buildAfterActionReport(
     factsReported: canonicalCopy(reported),
     factsDisproved: canonicalCopy(observed.filter((fact) => fact.status === "disproved")),
     factsLostWithShip: canonicalCopy(lost),
+    factsSalvagedFromLog: canonicalCopy(salvaged),
     reportSnapshotDay: active.reportSnapshot?.committedDay ?? null,
     reportSnapshotHash: active.reportSnapshot?.snapshotHash ?? null,
     campaignFactsChanged: canonicalCopy(changes),
@@ -985,7 +1075,13 @@ function finalizeExpedition(
     : active.reportSnapshot?.facts ?? [];
   const reportedIds = evidenceIds(reported);
   const lost = factsWithEvidenceOutside(observed, reportedIds);
-  const campaignFactsAfter = mergeCampaignFacts([...state.facts, ...reported]);
+  const salvaged = salvagedFacts(
+    lost,
+    active.runNumber,
+    active.journey.date,
+    surveyedLandmarkFactIds(active),
+  );
+  const campaignFactsAfter = mergeCampaignFacts([...state.facts, ...reported, ...salvaged]);
   const changes = factChanges(state.facts, campaignFactsAfter);
   const report = buildAfterActionReport(
     active,
@@ -994,6 +1090,7 @@ function finalizeExpedition(
     observed,
     reported,
     lost,
+    salvaged,
     changes,
     campaignFactsAfter,
   );
@@ -1008,6 +1105,7 @@ function finalizeExpedition(
     objectiveAchieved: active.journey.journey.objectiveAchieved,
     reportedFactCount: reported.length,
     lostFactCount: lost.length,
+    salvagedFactCount: salvaged.length,
     reportSnapshotDay: active.reportSnapshot?.committedDay ?? null,
     reportSnapshotHash: active.reportSnapshot?.snapshotHash ?? null,
   };
@@ -1151,7 +1249,7 @@ function assertRunSummary(value: unknown, label: string): void {
   exactKeys(item, [
     "runNumber", "runSeed", "outcome", "reason", "departureDate", "finalDate",
     "elapsedCommittedDays", "objectiveAchieved", "reportedFactCount", "lostFactCount",
-    "reportSnapshotDay", "reportSnapshotHash",
+    "salvagedFactCount", "reportSnapshotDay", "reportSnapshotHash",
   ], label);
   integer(item["runNumber"], `${label}.runNumber`, 1, 1_000_000);
   stringValue(item["runSeed"], `${label}.runSeed`, 256);
@@ -1167,6 +1265,7 @@ function assertRunSummary(value: unknown, label: string): void {
   }
   integer(item["reportedFactCount"], `${label}.reportedFactCount`);
   integer(item["lostFactCount"], `${label}.lostFactCount`);
+  integer(item["salvagedFactCount"], `${label}.salvagedFactCount`);
   if (item["reportSnapshotDay"] !== null) integer(item["reportSnapshotDay"], `${label}.reportSnapshotDay`);
   nullableHash(item["reportSnapshotHash"], `${label}.reportSnapshotHash`);
   if ((item["reportSnapshotDay"] === null) !== (item["reportSnapshotHash"] === null)) {
@@ -1206,7 +1305,8 @@ function assertAfterActionReport(value: unknown, label: string): void {
     "format", "runNumber", "runSeed", "outcome", "reason", "departureDate", "finalDate",
     "elapsedCommittedDays", "objectiveStatus", "startingMetrics", "finalMetrics",
     "waterConsumedKg", "provisionsConsumedKg", "factsObserved", "factsReported",
-    "factsDisproved", "factsLostWithShip", "reportSnapshotDay", "reportSnapshotHash",
+    "factsDisproved", "factsLostWithShip", "factsSalvagedFromLog", "reportSnapshotDay",
+    "reportSnapshotHash",
     "campaignFactsChanged", "nextExpeditionDifferences", "estimatedTrack", "trueTrack",
     "uncertaintyHistory", "currentContributionHistory", "observationHistory",
   ], label);
@@ -1225,8 +1325,17 @@ function assertAfterActionReport(value: unknown, label: string): void {
   assertMetrics(item["finalMetrics"], `${label}.finalMetrics`);
   integer(item["waterConsumedKg"], `${label}.waterConsumedKg`);
   integer(item["provisionsConsumedKg"], `${label}.provisionsConsumedKg`);
-  for (const key of ["factsObserved", "factsReported", "factsDisproved", "factsLostWithShip"] as const) {
+  for (const key of [
+    "factsObserved", "factsReported", "factsDisproved", "factsLostWithShip", "factsSalvagedFromLog",
+  ] as const) {
     assertSortedFacts(item[key], `${label}.${key}`);
+  }
+  for (const fact of item["factsSalvagedFromLog"] as readonly CampaignFact[]) {
+    // The report does not carry provenance, so it is held to the highest salvage tier. Both
+    // tiers sit below 70, which is the contract that matters: no salvaged finding is confirmed.
+    if (fact.confidence > SURVEYED_LANDMARK_SALVAGE_CONFIDENCE_CAP) {
+      throw new SimulationValidationError(`${label}.factsSalvagedFromLog exceeds the salvage confidence cap`);
+    }
   }
   if (item["reportSnapshotDay"] !== null) integer(item["reportSnapshotDay"], `${label}.reportSnapshotDay`);
   nullableHash(item["reportSnapshotHash"], `${label}.reportSnapshotHash`);
@@ -1518,6 +1627,9 @@ export function getCampaignPlayerView(state: Readonly<CampaignState>): CampaignP
   assertCampaignState(state);
   const active = state.activeExpedition;
   const snapshot = active?.reportSnapshot ?? null;
+  const unreported = active === null
+    ? []
+    : factsWithEvidenceOutside(loggedFacts(active), evidenceIds(snapshot?.facts ?? []));
   return deepFreeze({
     contentVersion: state.contentVersion,
     currentRunNumber: active?.runNumber ?? null,
@@ -1528,6 +1640,7 @@ export function getCampaignPlayerView(state: Readonly<CampaignState>): CampaignP
       deposited: snapshot !== null,
       date: snapshot?.date ?? null,
       factCount: snapshot?.facts.length ?? 0,
+      unreportedFactCount: unreported.length,
     },
     afterActionReports: canonicalCopy(state.afterActionReports),
   }) as CampaignPlayerView;

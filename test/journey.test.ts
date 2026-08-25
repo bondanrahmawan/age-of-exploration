@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AUTHORED_EVENTS,
+  EAST_WEST_OBSERVATION_FLOOR_MNM,
+  EVENT_TUNING,
+  EAST_WEST_OBSERVATION_TIERS,
   JOURNEY_STATE_FORMAT,
   LANDMARK_IDS,
   SimulationValidationError,
@@ -9,6 +13,9 @@ import {
   canonicalState,
   createJourneyFixtureState,
   createJourneyState,
+  eastWestObservationRefusal,
+  eligibleEventWeights,
+  eventText,
   getPlayerView,
   hashState,
   holdUsedKg,
@@ -306,13 +313,19 @@ const WIDE_ERROR_ENVIRONMENT: EnvironmentProvider = (context) => {
   return { ...base, uncertaintyPermille: 10_000, tackingUncertaintyPermille: 10_000 };
 };
 
-function atSea(seed: string, truePosition: { xMnm: number; yMnm: number }, estimatedPosition = truePosition) {
+function atSea(
+  seed: string,
+  truePosition: { xMnm: number; yMnm: number },
+  estimatedPosition = truePosition,
+  eastWestMnm?: number,
+) {
   return createJourneyFixtureState({
     contentVersion: "wp3-journey-v1",
     runSeed: seed,
     location: "at_sea",
     truePosition,
     estimatedPosition,
+    ...(eastWestMnm === undefined ? {} : { uncertainty: { eastWestMnm, northSouthMnm: 20_000 } }),
     dailyEventChancePermille: 0,
   });
 }
@@ -320,6 +333,13 @@ function atSea(seed: string, truePosition: { xMnm: number; yMnm: number }, estim
 const OPEN_OCEAN = { xMnm: -2_500_000, yMnm: -3_000_000 };
 const LAND_SIGNS = { xMnm: 700_000, yMnm: -3_000_000 };
 const SHOALING = { xMnm: 1_150_000, yMnm: -3_000_000 };
+
+/** No commanded run and no uncertainty growth, so a bracket can be watched on its own. */
+const STILL_ENVIRONMENT: EnvironmentProvider = (context) => {
+  const base = NO_MOVEMENT_ENVIRONMENT(context);
+  if (!("schema" in base)) throw new Error("still fixture requires a navigation environment");
+  return { ...base, uncertaintyPermille: 0, tackingUncertaintyPermille: 0 };
+};
 
 function widened(state: JourneySimulationState, days: number) {
   let next = state;
@@ -329,8 +349,25 @@ function widened(state: JourneySimulationState, days: number) {
   return next;
 }
 
-function observe(state: JourneySimulationState) {
-  return applyCommand(state, { type: "observation_day" }, NO_MOVEMENT_ENVIRONMENT) as JourneySimulationState;
+/** Ordinary growth, for bands that must land between the floor and the entry bracket. */
+function drifted(state: JourneySimulationState, days: number) {
+  let next = state;
+  for (let index = 0; index < days; index += 1) {
+    next = applyCommand(next, { type: "advance_day" }, NO_MOVEMENT_ENVIRONMENT) as JourneySimulationState;
+  }
+  return next;
+}
+
+function observe(state: JourneySimulationState, environment = NO_MOVEMENT_ENVIRONMENT) {
+  return applyCommand(state, { type: "observation_day" }, environment) as JourneySimulationState;
+}
+
+function observationActivity(state: JourneySimulationState) {
+  const entry = state.canonicalLog.at(-1);
+  if (entry?.type !== "journey_day" || entry.activity.kind !== "east_west_observation") {
+    throw new Error("the observation day must log its own activity");
+  }
+  return entry.activity;
 }
 
 describe("east-west observation days", () => {
@@ -361,38 +398,108 @@ describe("east-west observation days", () => {
   it("returns open ocean far from the shelf and never converges on a longitude", () => {
     const wide = widened(atSea("offshore", OPEN_OCEAN), 3);
     const before = wide.uncertainty.eastWestMnm;
-    let observed = wide;
-    for (let index = 0; index < 6; index += 1) observed = observe(observed);
+    const observed = observe(wide);
     expect(observed.journey.lastEastWestObservation).toEqual({ kind: "open_ocean" });
-    expect(observed.journey.observationDaysSpent).toBe(6);
+    expect(observed.journey.observationDaysSpent).toBe(1);
     expect(observed.uncertainty.eastWestMnm).toBeGreaterThan(before);
     expect(observed.estimatedPosition.xMnm).toBe(wide.estimatedPosition.xMnm);
     expect(observed.crew.moraleBps).toBeLessThan(wide.crew.moraleBps);
+
+    // A second look from the same standing is not information, so the order is refused
+    // rather than sold: the band offshore only ever grows.
+    expect(() => observe(observed)).toThrow(SimulationValidationError);
+    const sailed = drifted(observed, 1);
+    const again = observe(sailed);
+    expect(again.journey.lastEastWestObservation).toEqual({ kind: "open_ocean" });
+    expect(again.uncertainty.eastWestMnm).toBeGreaterThan(observed.uncertainty.eastWestMnm);
   });
 
   it("corrects the estimate only as far as the bracket edge and never onto the truth", () => {
-    const state = atSea("edge", SHOALING, { xMnm: SHOALING.xMnm - 900_000, yMnm: SHOALING.yMnm });
+    const state = atSea("edge", SHOALING, { xMnm: SHOALING.xMnm - 900_000, yMnm: SHOALING.yMnm }, 900_000);
     const observed = observe(state);
     expect(observed.estimatedPosition.xMnm).toBe(SHOALING.xMnm - 200_000);
     expect(observed.estimatedPosition.xMnm).not.toBe(observed.truePosition.xMnm);
   });
 
   it("never widens a band that is already inside the bracket", () => {
-    const observed = observe(atSea("tight", SHOALING));
+    const observed = observe(atSea("tight", SHOALING, SHOALING, 96_000));
     expect(observed.uncertainty.eastWestMnm).toBeLessThan(200_000);
-    const entry = observed.canonicalLog.at(-1);
-    if (entry?.type !== "journey_day" || entry.activity.kind !== "east_west_observation") {
-      throw new Error("the observation day must log its own activity");
-    }
-    expect(entry.activity.estimateCorrectionMnm).toBe(0);
+    const activity = observationActivity(observed);
+    expect(activity.estimateCorrectionMnm).toBe(0);
+    expect(activity.eastWestUncertaintyAfterMnm).toBeLessThanOrEqual(activity.eastWestUncertaintyBeforeMnm);
   });
 
   it("leaks the bracket but never the true position", () => {
-    const observed = observe(atSea("projection", SHOALING, { xMnm: 900_000, yMnm: -3_000_000 }));
+    const observed = observe(atSea("projection", SHOALING, { xMnm: 900_000, yMnm: -3_000_000 }, 900_000));
     const encoded = JSON.stringify(getPlayerView(observed));
     expect(encoded).toContain("shoaling_water");
     expect(encoded).not.toContain("truePosition");
     expect(encoded).not.toContain(String(observed.truePosition.xMnm));
+  });
+
+  it("keeps paying for sustained work on the same ground, at a diminishing rate", () => {
+    let state = observe(atSea("worked-shelf", SHOALING, SHOALING, 900_000), STILL_ENVIRONMENT);
+    expect(state.uncertainty.eastWestMnm).toBe(200_000);
+
+    const bands = [state.uncertainty.eastWestMnm];
+    const steps: number[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const previous = state.uncertainty.eastWestMnm;
+      state = observe(state, STILL_ENVIRONMENT);
+      expect(state.uncertainty.eastWestMnm).toBeLessThan(previous);
+      bands.push(state.uncertainty.eastWestMnm);
+      steps.push(previous - state.uncertainty.eastWestMnm);
+    }
+    expect(bands).toEqual([200_000, 160_040, 133_387, 115_609, 103_751]);
+    for (let index = 1; index < steps.length; index += 1) {
+      expect(steps[index]!).toBeLessThan(steps[index - 1]!);
+    }
+    expect(state.journey.observationDaysSpent).toBe(5);
+    expect(observationActivity(state).eastWestUncertaintyAfterMnm)
+      .toBeLessThan(observationActivity(state).eastWestUncertaintyBeforeMnm);
+  });
+
+  it("stops at the tier floor and then refuses the order instead of selling the day", () => {
+    let state = observe(atSea("floored-shelf", SHOALING, SHOALING, 900_000), STILL_ENVIRONMENT);
+    for (let index = 0; index < 9; index += 1) {
+      state = observe(state, STILL_ENVIRONMENT);
+      expect(state.uncertainty.eastWestMnm).toBeGreaterThanOrEqual(EAST_WEST_OBSERVATION_FLOOR_MNM);
+    }
+    expect(state.uncertainty.eastWestMnm).toBe(EAST_WEST_OBSERVATION_FLOOR_MNM);
+    expect(state.journey.observationDaysSpent).toBe(10);
+    expect(() => observe(state, STILL_ENVIRONMENT)).toThrow(SimulationValidationError);
+  });
+
+  it("never lets the working floor beat the tier the ship is actually in", () => {
+    let state = observe(atSea("signs-floor", LAND_SIGNS, LAND_SIGNS, 900_000), STILL_ENVIRONMENT);
+    for (let index = 0; index < 20; index += 1) {
+      try {
+        state = observe(state, STILL_ENVIRONMENT);
+      } catch {
+        break;
+      }
+    }
+    const landSignsFloor = EAST_WEST_OBSERVATION_TIERS
+      .find((tier) => tier.kind === "land_signs")!.floorMnm;
+    expect(state.uncertainty.eastWestMnm).toBe(landSignsFloor);
+    expect(landSignsFloor).toBeGreaterThan(EAST_WEST_OBSERVATION_FLOOR_MNM);
+    expect(() => observe(state, STILL_ENVIRONMENT)).toThrow(SimulationValidationError);
+  });
+
+  it("refuses an observation the reckoning is already too tight to need", () => {
+    const state = atSea("already-tight", SHOALING);
+    expect(state.uncertainty.eastWestMnm).toBeLessThanOrEqual(EAST_WEST_OBSERVATION_FLOOR_MNM);
+    expect(() => observe(state)).toThrow(SimulationValidationError);
+    expect(eastWestObservationRefusal(state.uncertainty, state.canonicalLog))
+      .toContain("No sounding or land sign can better that");
+  });
+
+  it("spends no day, no stores, and no morale on a refused observation", () => {
+    const state = observe(widened(atSea("refused-cost", OPEN_OCEAN), 3));
+    const before = canonicalState(state);
+    expect(() => observe(state)).toThrow(SimulationValidationError);
+    expect(canonicalState(state)).toBe(before);
+    expect(state.committedDay).toBe(observe(drifted(state, 1)).committedDay - 2);
   });
 
   it("refuses an observation day anywhere but at sea", () => {
@@ -401,7 +508,7 @@ describe("east-west observation days", () => {
   });
 
   it("takes a landmark fix without letting a look-around finish the voyage", () => {
-    const state = atSea("home-waters", { xMnm: 0, yMnm: 0 }, { xMnm: 400_000, yMnm: 0 });
+    const state = atSea("home-waters", { xMnm: 0, yMnm: 0 }, { xMnm: 400_000, yMnm: 0 }, 900_000);
     const observed = observe(state);
     expect(observed.navigation.lastLandfall).toEqual({
       kind: "recognised",
@@ -412,4 +519,152 @@ describe("east-west observation days", () => {
     expect(observed.journey.outcome).toBeNull();
   });
 
+});
+
+describe("WP3 unfinished work carries a careful expedition towards the escalation gates", () => {
+  const TUNING = EVENT_TUNING.unfinishedWork;
+
+  function underway(seed: string, overrides: Record<string, unknown> = {}) {
+    const state = createJourneyFixtureState({
+      contentVersion: "wp3-journey-v1",
+      runSeed: seed,
+      location: "at_sea",
+      dailyEventChancePermille: 0,
+      waterKg: 24_000,
+      provisionsKg: 18_000,
+      repairStoresKg: 8_000,
+      medicineKg: 2_000,
+      ...overrides,
+    });
+    return applyCommand(state, { type: "set_heading", heading: "S" });
+  }
+
+  function sail(state: JourneySimulationState, days: number) {
+    let next = state;
+    for (let day = 0; day < days; day += 1) {
+      next = applyCommand(next, { type: "advance_day" });
+    }
+    return next;
+  }
+
+  it("gives every event an unconditional branch that is legal but never free", () => {
+    for (const event of AUTHORED_EVENTS) {
+      const unconditional = event.choices.filter((item) => {
+        const requirement = item.requirement;
+        return requirement.minimumMoneyDucats === undefined
+          && requirement.minimumWaterKg === undefined
+          && requirement.minimumProvisionsKg === undefined
+          && requirement.minimumRepairStoresKg === undefined
+          && requirement.minimumMedicineKg === undefined
+          && requirement.minimumMoraleBps === undefined
+          && (requirement.requiredFlags?.length ?? 0) === 0;
+      });
+      expect(unconditional.length).toBeGreaterThan(0);
+      for (const item of unconditional) {
+        const conditionSpent = -(
+          (item.effects.crewHealthDeltaBps ?? 0) + (item.effects.crewMoraleDeltaBps ?? 0)
+          + (item.effects.hullDeltaBps ?? 0) + (item.effects.mastDeltaBps ?? 0)
+          + (item.effects.sailsDeltaBps ?? 0) + (item.effects.rudderDeltaBps ?? 0)
+        );
+        const price = conditionSpent >= 200
+          || (item.effects.unfinishedWorkDelta ?? 0) !== 0
+          || (item.delayed?.length ?? 0) > 0
+          || item.effects.abandonObjective === true
+          || item.effects.terminalReason !== undefined
+          || (item.effects.waterDeltaKg ?? 0) < 0
+          || (item.effects.provisionsDeltaKg ?? 0) < 0
+          || (item.effects.repairStoresDeltaKg ?? 0) < 0
+          || (item.effects.medicineDeltaKg ?? 0) < 0;
+        expect(price, event.id + "." + item.id + " is unconditional and free").toBe(true);
+      }
+    }
+  });
+
+  it("accrues a job on its own account for every stretch of days at sea", () => {
+    const start = underway("baseline-accrual");
+    expect(start.journey.unfinishedWork).toBe(0);
+    expect(sail(start, TUNING.baselineAccrualDays - 1).journey.unfinishedWork).toBe(0);
+    expect(sail(start, TUNING.baselineAccrualDays).journey.unfinishedWork).toBe(1);
+    expect(sail(start, TUNING.baselineAccrualDays * 3).journey.unfinishedWork).toBe(3);
+  });
+
+  it("costs nothing while the list is short and wears crew and hull once it is not", () => {
+    const tolerated = sail(underway("within-tolerance"), TUNING.baselineAccrualDays * TUNING.toleranceBeforeWear);
+    expect(tolerated.journey.unfinishedWork).toBe(TUNING.toleranceBeforeWear);
+    expect(tolerated.crew.healthBps).toBe(10_000);
+    expect(tolerated.crew.moraleBps).toBe(7_500);
+    expect(tolerated.ship.hullBps).toBe(10_000);
+
+    const carrying = sail(tolerated, TUNING.baselineAccrualDays * 3);
+    expect(carrying.journey.unfinishedWork).toBe(TUNING.toleranceBeforeWear + 3);
+    expect(carrying.crew.healthBps).toBeLessThan(10_000);
+    expect(carrying.crew.moraleBps).toBeLessThan(7_500);
+    expect(carrying.ship.hullBps).toBeLessThan(10_000);
+  });
+
+  it("lets a repair day work the list down at the standing cost of a day and stores", () => {
+    const carrying = sail(underway("repair-clears"), TUNING.baselineAccrualDays * 4);
+    expect(carrying.journey.unfinishedWork).toBe(4);
+    const repaired = applyCommand(carrying, { type: "repair_day", component: "hull", location: "at_sea" });
+    expect(repaired.journey.unfinishedWork).toBe(3);
+    expect(repaired.stores.repairStoresKg).toBeLessThan(carrying.stores.repairStoresKg);
+  });
+
+  it("never carries more than the authored maximum", () => {
+    const saturated = sail(underway("saturated"), TUNING.baselineAccrualDays * (TUNING.maximum + 4));
+    expect(saturated.journey.unfinishedWork).toBe(TUNING.maximum);
+  });
+
+  it("opens the escalation gates a sound ship on a flat voyage can never reach", () => {
+    const gated = ["ship.hull-leak", "crew.fatigue", "crew.grumbling"];
+    const sound = underway("gates-shut");
+    const shutIds = eligibleEventWeights(sound).map((item) => item.event.id);
+    for (const id of gated) expect(shutIds).not.toContain(id);
+
+    const worn = underway("gates-open", {
+      healthBps: 8_400,
+      moraleBps: 4_400,
+      hullBps: 8_400,
+    });
+    const openIds = eligibleEventWeights(worn).map((item) => item.event.id);
+    for (const id of gated) expect(openIds).toContain(id);
+  });
+
+  it("weights the dangerous events up once the list is long, not only unlocking them", () => {
+    const overrides = { moraleBps: 4_400 };
+    const short = underway("weight-short", overrides);
+    const carrying = sail(
+      underway("weight-long", overrides),
+      TUNING.baselineAccrualDays * TUNING.pressureThreshold,
+    );
+    expect(carrying.journey.unfinishedWork).toBeGreaterThanOrEqual(TUNING.pressureThreshold);
+
+    const weightOf = (state: JourneySimulationState, id: string) =>
+      eligibleEventWeights(state).find((item) => item.event.id === id)?.weight ?? 0;
+    expect(weightOf(carrying, "crew.grumbling")).toBeGreaterThan(weightOf(short, "crew.grumbling"));
+  });
+
+  it("reads the standing list in remembered text the way it already reads preparation", () => {
+    const event = AUTHORED_EVENTS.find((item) => item.id === "ship.rudder-strain")!;
+    const short = underway("memory-short");
+    const carrying = sail(underway("memory-long"), TUNING.baselineAccrualDays * TUNING.pressureThreshold);
+    expect(eventText(short, event)).toBe(event.logText);
+    expect(eventText(carrying, event)).toContain("list of jobs");
+  });
+
+  it("leaves the preparation loop it sits beside exactly as it was", () => {
+    const spoiled = AUTHORED_EVENTS.find((item) => item.id === "stores.spoiled-provisions")!;
+    const unprepared = underway("preparation-intact");
+    expect(eventText(unprepared, spoiled)).toBe(spoiled.logText);
+
+    let prepared = unprepared;
+    const rats = AUTHORED_EVENTS.find((item) => item.id === "stores.rats")!;
+    expect(rats.choices.find((item) => item.id === "hunt-and-clean")!.effects.setFlags)
+      .toContain("stores_secured");
+    prepared = {
+      ...unprepared,
+      journey: { ...unprepared.journey, flags: ["stores_secured"] },
+    } as JourneySimulationState;
+    expect(eventText(prepared, spoiled)).toContain("earlier effort to secure the stores");
+  });
 });

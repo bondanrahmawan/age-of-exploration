@@ -19,12 +19,13 @@ export function AfterActionScreen({ report, autosaveBoundary, controller }: { re
           <p class="eyebrow">Finalized expedition {report.runNumber}</p>
           <h1>{report.outcome}</h1>
           <p class="lede">{report.reason}</p>
+          <p class="outcome-explanation">{report.outcomeExplanation}</p>
         </div>
         <dl class="report-dates">
           <div><dt>Departed</dt><dd>{report.departureDate}</dd></div>
           <div><dt>Ended</dt><dd>{report.finalDate}</dd></div>
           <div><dt>Days at sea</dt><dd>{report.elapsedDays}</dd></div>
-          <div><dt>Objective</dt><dd>{report.objectiveStatus}</dd></div>
+          <div><dt>Objective</dt><dd>{report.objectiveStatus}<small>{report.objectiveStatusNote}</small></dd></div>
           <div><dt>Campaign save</dt><dd><span class="save-dot" aria-hidden="true" />Saved · {autosaveBoundary}</dd></div>
         </dl>
       </header>
@@ -65,7 +66,12 @@ export function AfterActionScreen({ report, autosaveBoundary, controller }: { re
         <FactSection title="Seen at sea" facts={report.factsObserved} emptyText="The crew saw nothing new." />
         <FactSection title="Reached the chart" facts={report.factsReported} emptyText="Nothing new reached the campaign chart." />
         <FactSection title="Proved wrong" facts={report.factsDisproved} emptyText="No rumour was proved wrong." />
-        <FactSection title="Lost with the ship" facts={report.factsLost} emptyText="Nothing the crew saw was lost." />
+        <FactSection title="Lost outright" facts={report.factsLost} emptyText="Nothing the crew saw was lost outright." />
+        <section class="report-fact-section">
+          <h3>Salvaged from the log</h3>
+          <p>Word of these reached Lisbon without the ship, so each stands at reduced confidence — enough to steer for, never enough to correct the reckoning by itself.</p>
+          <FactList facts={report.factsSalvaged} emptyText="Nothing needed salvaging." />
+        </section>
       </section>
 
       <section class="next-expedition-card" aria-labelledby="next-run-title">
