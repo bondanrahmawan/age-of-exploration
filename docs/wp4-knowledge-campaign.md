@@ -128,10 +128,20 @@ terminal outcome. This preserves the required save boundary immediately before
 finalization.
 
 - A recognised Lisbon return reports every eligible carried fact.
-- Any loss or other termination reports only the latest Cape Verde snapshot.
-- A loss with no snapshot reports no new fact.
-- Earlier campaign facts are never removed by a failed expedition.
-- Evidence learned after the last snapshot is listed as lost and is not merged.
+- Any loss or other termination reports only the latest Cape Verde snapshot at
+  full strength.
+- Evidence learned after the last snapshot is listed as lost with the ship, and
+  is then merged as salvage: one piece of evidence per finding, its confidence
+  the lower of the finding's own and the salvage cap of 40, its status
+  `observed` at the cap, `rumoured` below it, and `disproved` if the expedition
+  disproved the claim. Its source names the salvage.
+- Salvage never reaches confidence 70 on its own, so it cannot by itself confirm
+  a fact or earn automatic navigation correction, and it never changes the run
+  outcome.
+- A loss with no snapshot therefore reports no fact at full strength, but still
+  salvages what the expedition logged.
+- Earlier campaign facts are never removed or weakened by a failed expedition;
+  salvaged evidence merges alongside them under the ordinary confidence rules.
 
 Campaign outcomes are exactly:
 
@@ -158,7 +168,9 @@ The hidden trace is serialized in campaign saves and reproduced by campaign
 replay. It is omitted from `getCampaignPlayerView`, along with active true
 position/track, all PRNG state, unknown-current geometry, pending consequences,
 future events, and snapshot internals. The projection exposes only snapshot
-date and fact count.
+date, fact count, and the number of logged findings no deposited copy holds.
+That last count is derived from journey facts and navigation knowledge only,
+never from the hidden trace, so it can be shown on deck while the voyage runs.
 
 Finalization converts the hidden trace into serializable after-action data:
 
@@ -166,7 +178,8 @@ Finalization converts the hidden trace into serializable after-action data:
   objective status;
 - departure and final crew, ship, and store metrics;
 - exact total water and provisions consumed from v4 day logs;
-- facts observed, reported, disproved, and evidence lost with the ship;
+- facts observed, reported, disproved, evidence lost with the ship, and the
+  salvaged records that reached Lisbon in its place;
 - snapshot day/hash and campaign fact changes inherited next time;
 - estimated track, true track, uncertainty, and actual error history.
 

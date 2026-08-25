@@ -118,12 +118,16 @@ import {
   copyCommand,
 } from "./validation.js";
 import {
+  EAST_WEST_OBSERVATION_CLOSE_PERMILLE,
+  EAST_WEST_OBSERVATION_FLOOR_MNM,
+  EAST_WEST_OBSERVATION_MIN_STEP_MNM,
   LANDMARKS,
   LANDMARK_IDS,
   createStartingNavigationKnowledge,
   eastWestObservationTier,
   seasonForDate,
   windBandForPosition,
+  type EastWestObservationTier,
 } from "./world.js";
 
 const BASE_DAILY_RUN_MNM = 96_000;
@@ -773,9 +777,11 @@ export function createJourneyFixtureState(
     ...detachedState(base) as JourneySimulationState,
     truePosition: { ...truePosition },
     estimatedPosition: { ...estimatedPosition },
-    uncertainty: location === "at_sea"
-      ? { ...base.uncertainty }
-      : { eastWestMnm: 5_000, northSouthMnm: 5_000 },
+    uncertainty: config.uncertainty !== undefined
+      ? { ...config.uncertainty }
+      : location === "at_sea"
+        ? { ...base.uncertainty }
+        : { eastWestMnm: 5_000, northSouthMnm: 5_000 },
     crew,
     stores,
     moneyDucats: config.moneyDucats ?? (lifecycle === "outfitting" ? 300 : 100),
@@ -1100,17 +1106,75 @@ function resolveNavigationObservation(
 }
 
 /**
+ * Why a deliberate east-west observation would be refused right now, or null when it can
+ * still buy something.
+ *
+ * Both tests read only what the player can already see — the band drawn on the chart and
+ * the last committed day — so the interface can grey the order out for exactly the reason
+ * the engine would reject it, without either side consulting the true position. A refused
+ * observation costs no day, no stores, and no morale.
+ */
+export function eastWestObservationRefusal(
+  uncertainty: Readonly<UncertaintyRadiiMnm>,
+  log: readonly CanonicalLogEntry[],
+): string | null {
+  if (uncertainty.eastWestMnm <= EAST_WEST_OBSERVATION_FLOOR_MNM) {
+    return `The reckoning is already inside ${EAST_WEST_OBSERVATION_FLOOR_MNM / 1_000} nm east and west. `
+      + "No sounding or land sign can better that.";
+  }
+  const last = log.at(-1);
+  if (
+    last?.type === "journey_day"
+    && last.activity.kind === "east_west_observation"
+    && last.activity.eastWestUncertaintyAfterMnm >= last.activity.eastWestUncertaintyBeforeMnm
+  ) {
+    return "Yesterday's observation gained nothing and the ship has made no run since. "
+      + "Sail a day before working the lead again.";
+  }
+  return null;
+}
+
+/**
+ * How wide a bracket one more day of work in the same tier can establish. First contact
+ * with a tier buys its entry bracket and no more. Staying with that tier and working it
+ * again closes a fixed share of what is left between the present bracket and the tier's
+ * floor, so sustained effort keeps paying at a diminishing rate and stops at the floor.
+ */
+function convergedBracketMnm(
+  tier: Readonly<EastWestObservationTier>,
+  eastWestMnm: number,
+  continuing: boolean,
+): number {
+  if (!continuing) return tier.entryBracketMnm;
+  const startMnm = Math.min(eastWestMnm, tier.entryBracketMnm);
+  const gapMnm = startMnm - tier.floorMnm;
+  if (gapMnm <= 0) return startMnm;
+  const stepMnm = Math.max(
+    EAST_WEST_OBSERVATION_MIN_STEP_MNM,
+    scaleByPermille(gapMnm, [EAST_WEST_OBSERVATION_CLOSE_PERMILLE], "east-west observation step"),
+  );
+  return Math.max(tier.floorMnm, startMnm - stepMnm);
+}
+
+/**
  * A deliberate east-west observation. The crew reads the lead, the water, and the birds
  * against the authored shelf and reports a bracket rather than a position: the true
  * longitude lies inside the returned radius of the corrected estimate, and that radius is
  * the same figure already drawn on the chart, so the observation discloses nothing the
- * player cannot already see. Open water returns nothing at all, which is why repeating
- * the observation offshore never converges on a longitude the period could not measure.
+ * player cannot already see.
+ *
+ * Working the same tier day after day narrows that bracket toward the tier's floor. This is
+ * coastal recognition getting sharper with more soundings and more bottom samples, not a
+ * longitude measurement: the floor is a hard bound the crew can never beat, the tier is
+ * chosen by the ship's true distance from the shelf rather than by effort, and open water
+ * still returns nothing at all. Repeating the observation offshore therefore never
+ * converges on a longitude the period could not measure.
  */
 function resolveEastWestObservation(
   truePosition: Readonly<PositionMnm>,
   estimatedPosition: Readonly<PositionMnm>,
   uncertainty: Readonly<UncertaintyRadiiMnm>,
+  lastResult: Readonly<EastWestObservationResult>,
 ): {
   readonly result: EastWestObservationResult;
   readonly estimatedPosition: PositionMnm;
@@ -1124,7 +1188,11 @@ function resolveEastWestObservation(
       uncertainty: { ...uncertainty },
     };
   }
-  const bracketMnm = tier.eastWestUncertaintyMnm;
+  const bracketMnm = convergedBracketMnm(
+    tier,
+    uncertainty.eastWestMnm,
+    lastResult.kind === tier.kind,
+  );
   return {
     result: tier.kind === "shoaling_water"
       ? { kind: "shoaling_water", eastWestUncertaintyMnm: 200_000 }
@@ -1658,6 +1726,10 @@ function validateSurvivalDayCommand(
     if (sailingCapabilityStatus(state.crew, state.ship).kind !== "active") {
       throw new SimulationValidationError("an east-west observation requires a ship still able to work");
     }
+    const refusal = eastWestObservationRefusal(state.uncertainty, state.canonicalLog);
+    if (refusal !== null) {
+      throw new SimulationValidationError(`an east-west observation cannot buy anything here: ${refusal}`);
+    }
     return;
   }
   if (command.type === "collect_cape_water") {
@@ -1821,6 +1893,9 @@ function advanceSurvivalDay(
       movement.truePosition,
       observed.estimatedPosition,
       observed.uncertainty,
+      state.format === JOURNEY_STATE_FORMAT
+        ? state.journey.lastEastWestObservation
+        : { kind: "none" },
     );
     const resolvedLandfall = resolveLandfall(
       state,

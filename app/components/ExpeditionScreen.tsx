@@ -109,6 +109,7 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
       <SessionBriefing
         milestone={model.mission.milestone}
         missionStatus={model.mission.status}
+        record={model.record}
         date={model.deck.date}
         elapsedDays={model.deck.elapsedDays}
         autosaveBoundary={autosaveBoundary}
@@ -162,7 +163,7 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
             <button type="button" disabled={isAdvancing} aria-keyshortcuts="D" onClick={() => controller.advanceOneDay()}>Sail one day <kbd>D</kbd></button>
             <button type="button" disabled={isAdvancing || model.deck.observationReason !== null} onClick={() => controller.dispatchSimulation({ type: "observation_day" })}>
               Lie to and observe
-              <small>{model.deck.observationReason ?? `One day, no ground made. Sounds for a coast to fix east and west. ${model.deck.observationDaysSpent} spent so far.`}</small>
+              <small>{`${model.deck.observationReason ?? "One day, no ground made. Sounds and land signs fix east and west, and working the same ground again closes the band further."} ${model.deck.observationDaysSpent} spent so far.`}</small>
             </button>
             <button type="button" disabled={!isAdvancing} aria-keyshortcuts="Escape" onClick={() => controller.stopAdvance()}>Stop after this day</button>
           </div>

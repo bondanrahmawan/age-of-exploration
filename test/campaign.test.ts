@@ -25,6 +25,7 @@ import {
 
 const CONTENT_VERSION = "wp4-knowledge-campaign-v2";
 
+
 function loseAtCapeVerde(state: CampaignState): CampaignState {
   state = forward(state, { type: "careen_day_at_cape_verde" });
   state = forward(state, { type: "careen_day_at_cape_verde" });
@@ -204,7 +205,7 @@ describe("WP4 campaign facts, report deposit, and outcomes", () => {
     for (const fact of last.facts) expect(state.facts.some((item) => item.id === fact.id)).toBe(true);
   });
 
-  it("marks facts learned after the final deposit as lost", () => {
+  it("salvages facts learned after the final deposit, never above their own confidence", () => {
     let state = createCampaignFixtureState({
       contentVersion: CONTENT_VERSION,
       runSeed: "late-fact",
@@ -214,11 +215,17 @@ describe("WP4 campaign facts, report deposit, and outcomes", () => {
     state = forward(state, { type: "purchase_cape_verde_rumour" });
     const lateId = state.activeExpedition!.journey.journey.facts[0]!.id;
     state = finalize(loseAtCapeVerde(state));
-    expect(state.facts.some((fact) => fact.id === lateId)).toBe(false);
-    expect(state.afterActionReports[0]?.factsLostWithShip.some((fact) => fact.id === lateId)).toBe(true);
+    const report = state.afterActionReports[0]!;
+    expect(report.factsLostWithShip.some((fact) => fact.id === lateId)).toBe(true);
+    const salvaged = state.facts.find((fact) => fact.id === lateId)!;
+    // A purchased rumour is worth 25, and the salvage cap of 40 cannot raise it.
+    expect(salvaged.confidence).toBe(25);
+    expect(salvaged.status).toBe("rumoured");
+    expect(salvaged.source).toContain("salvaged from a lost expedition");
+    expect(report.factsSalvagedFromLog.map((fact) => fact.id)).toContain(lateId);
   });
 
-  it("persists no new facts after a loss without a deposit", () => {
+  it("salvages an undeposited observation at the capped confidence instead of erasing it", () => {
     const lostFact = observedFact("fact.no-deposit");
     let state = createCampaignFixtureState({
       contentVersion: CONTENT_VERSION,
@@ -226,7 +233,113 @@ describe("WP4 campaign facts, report deposit, and outcomes", () => {
       journey: { location: "cape_verde", hullBps: 0, dailyEventChancePermille: 0, facts: [lostFact] },
     });
     state = finalize(loseAtCapeVerde(state));
-    expect(state.facts.some((fact) => fact.id === lostFact.id)).toBe(false);
+    const salvaged = state.facts.find((fact) => fact.id === lostFact.id)!;
+    // Seen at 55 aboard, but only word of it reached Lisbon.
+    expect(lostFact.confidence).toBe(55);
+    expect(salvaged.confidence).toBe(40);
+    expect(salvaged.status).toBe("observed");
+    expect(state.completedRuns[0]?.salvagedFactCount).toBe(state.completedRuns[0]?.lostFactCount);
+  });
+
+  it("keeps salvage below the confidence that earns automatic navigation correction", () => {
+    let state = createCampaignFixtureState({
+      contentVersion: CONTENT_VERSION,
+      runSeed: "salvage-ceiling",
+      journey: {
+        location: "cape_verde",
+        hullBps: 0,
+        dailyEventChancePermille: 0,
+        facts: [
+          { ...observedFact("fact.certain-anchorage"), confidence: 100, status: "confirmed" },
+          { ...observedFact("fact.certain-anchorage-twin"), confidence: 100, status: "confirmed" },
+        ],
+      },
+    });
+    state = finalize(loseAtCapeVerde(state));
+    for (const id of ["fact.certain-anchorage", "fact.certain-anchorage-twin"]) {
+      const salvaged = state.facts.find((fact) => fact.id === id)!;
+      expect(salvaged.confidence).toBe(40);
+      expect(salvaged.status).toBe("observed");
+      expect(salvaged.evidence).toHaveLength(1);
+    }
+    expect(state.afterActionReports[0]?.factsSalvagedFromLog.every((fact) => fact.confidence <= 40)).toBe(true);
+  });
+
+  it("keeps a deposited report stronger than the same finding salvaged from a loss", () => {
+    const fact = observedFact("fact.deposit-beats-salvage");
+    const run = (deposit: boolean) => {
+      let state = createCampaignFixtureState({
+        contentVersion: CONTENT_VERSION,
+        runSeed: `deposit-${String(deposit)}`,
+        journey: { location: "cape_verde", hullBps: 0, dailyEventChancePermille: 0, facts: [fact] },
+      });
+      if (deposit) state = executeCampaignCommand(state, { type: "deposit_report_at_cape_verde" });
+      return finalize(loseAtCapeVerde(state)).facts.find((item) => item.id === fact.id)!;
+    };
+    expect(run(true).confidence).toBe(55);
+    expect(run(false).confidence).toBe(40);
+  });
+
+  it("does not let a salvaged Cape complete the objective", () => {
+    let state = createCampaignFixtureState({
+      contentVersion: CONTENT_VERSION,
+      runSeed: "salvaged-cape",
+      journey: { location: "cape_verde", hullBps: 0, objectiveAchieved: true, dailyEventChancePermille: 0 },
+    });
+    state = finalize(loseAtCapeVerde(state));
+    expect(state.completedRuns[0]?.outcome).toBe("objective_failure");
+    expect(state.afterActionReports[0]?.factsSalvagedFromLog.every((fact) => fact.status !== "confirmed")).toBe(true);
+  });
+
+  it("leaves a disproved claim disproved when it is salvaged", () => {
+    const disproved: JourneyFact = {
+      ...observedFact("fact.disproved-island"),
+      status: "disproved",
+      confidence: 80,
+      claim: "No island lies west of the southern route.",
+    };
+    let state = createCampaignFixtureState({
+      contentVersion: CONTENT_VERSION,
+      runSeed: "salvage-disproved",
+      journey: { location: "cape_verde", hullBps: 0, dailyEventChancePermille: 0, facts: [disproved] },
+    });
+    state = finalize(loseAtCapeVerde(state));
+    const salvaged = state.facts.find((fact) => fact.id === disproved.id)!;
+    expect(salvaged.status).toBe("disproved");
+    expect(salvaged.confidence).toBe(40);
+  });
+
+  it("reports a safe return at full strength and salvages nothing", () => {
+    const newFact = observedFact("fact.no-salvage-needed");
+    let state = createCampaignFixtureState({
+      contentVersion: CONTENT_VERSION,
+      runSeed: "safe-return-no-salvage",
+      journey: {
+        location: "at_sea",
+        truePosition: { xMnm: 0, yMnm: 0 },
+        estimatedPosition: { xMnm: 0, yMnm: 0 },
+        dailyEventChancePermille: 0,
+        facts: [newFact],
+      },
+    });
+    state = forward(state, { type: "advance_day" }, NO_MOVEMENT_ENVIRONMENT);
+    state = finalize(state);
+    expect(state.afterActionReports[0]?.factsSalvagedFromLog).toEqual([]);
+    expect(state.completedRuns[0]?.salvagedFactCount).toBe(0);
+    expect(state.facts.find((fact) => fact.id === newFact.id)?.confidence).toBe(55);
+  });
+
+  it("counts findings riding only in the log while the voyage is still running", () => {
+    let state = createCampaignFixtureState({
+      contentVersion: CONTENT_VERSION,
+      runSeed: "unreported-count",
+      journey: { location: "cape_verde", dailyEventChancePermille: 0, facts: [observedFact("fact.riding-aboard")] },
+    });
+    expect(getCampaignPlayerView(state).depositedReport.unreportedFactCount).toBe(1);
+    state = executeCampaignCommand(state, { type: "deposit_report_at_cape_verde" });
+    expect(getCampaignPlayerView(state).depositedReport.unreportedFactCount).toBe(0);
+    state = forward(state, { type: "purchase_cape_verde_rumour" });
+    expect(getCampaignPlayerView(state).depositedReport.unreportedFactCount).toBe(1);
   });
 
   it("does not turn an early pre-Cape deposit into report success", () => {
@@ -382,7 +495,7 @@ describe("WP4 truth boundary, after-action data, and expedition inheritance", ()
     expect(JSON.stringify(supported.currentContributionHistory)).toContain("vectorMnmPerDay");
   });
 
-  it("starts expedition 2 with only reported knowledge and never revives a lost observation", () => {
+  it("starts expedition 2 with the deposited report at full strength and the rest as salvage", () => {
     const reported = observedFact("fact.reported-before-loss");
     let state = createCampaignFixtureState({
       contentVersion: CONTENT_VERSION,
@@ -391,13 +504,14 @@ describe("WP4 truth boundary, after-action data, and expedition inheritance", ()
     });
     state = executeCampaignCommand(state, { type: "deposit_report_at_cape_verde" });
     state = forward(state, { type: "purchase_cape_verde_rumour" });
-    const lostId = state.activeExpedition!.journey.journey.facts.find((fact) => fact.id !== reported.id)!.id;
+    const undeposited = state.activeExpedition!.journey.journey.facts.find((fact) => fact.id !== reported.id)!;
     state = finalize(loseAtCapeVerde(state));
     state = start(state, "inherit-run-2");
-    const inheritedIds = state.activeExpedition!.inheritedFacts.map((fact) => fact.id);
-    expect(inheritedIds).toContain(reported.id);
-    expect(inheritedIds).not.toContain(lostId);
-    expect(JSON.stringify(state.activeExpedition)).not.toContain(lostId);
+    const inherited = state.activeExpedition!.inheritedFacts;
+    expect(inherited.find((fact) => fact.id === reported.id)?.confidence).toBe(55);
+    const salvaged = inherited.find((fact) => fact.id === undeposited.id)!;
+    expect(salvaged.confidence).toBeLessThanOrEqual(40);
+    expect(salvaged.source).toContain("salvaged from a lost expedition");
   });
 
   it("starts expedition 3 with accumulated reported facts and no hard three-run cap", () => {
@@ -477,6 +591,7 @@ describe("WP4 truth boundary, after-action data, and expedition inheritance", ()
         location: "at_sea",
         truePosition: { xMnm: 1_150_000, yMnm: -3_000_000 },
         estimatedPosition: { xMnm: 250_000, yMnm: -3_000_000 },
+        uncertainty: { eastWestMnm: 1_500_000, northSouthMnm: 100_000 },
         waterKg: 0,
         healthBps: 2_000,
         dailyEventChancePermille: 0,

@@ -233,6 +233,24 @@ describe("WP4 campaign save/resume determinism", () => {
     );
   });
 
+  it("round-trips a losing finalization that salvages the log", () => {
+    const build = () => {
+      const state = createCampaignFixtureState({
+        contentVersion: CONTENT_VERSION,
+        runSeed: "resume-salvage",
+        journey: { location: "cape_verde", hullBps: 0, dailyEventChancePermille: 0 },
+      });
+      const withRumour = forward(state, { type: "purchase_cape_verde_rumour" });
+      return forward(forward(withRumour, { type: "careen_day_at_cape_verde" }), { type: "careen_day_at_cape_verde" });
+    };
+    const state = build();
+    const uninterrupted = executeCampaignCommand(state, { type: "finalize_expedition" });
+    expect(uninterrupted.afterActionReports[0]!.factsSalvagedFromLog.length).toBeGreaterThan(0);
+    expect(canonicalCampaignState(executeCampaignCommand(roundTrip(state), { type: "finalize_expedition" }))).toBe(
+      canonicalCampaignState(uninterrupted),
+    );
+  });
+
   it("round-trips between completed expeditions", () => {
     let state = createCampaignFixtureState({
       contentVersion: CONTENT_VERSION,
@@ -269,6 +287,40 @@ describe("WP4 campaign replay, projections, and compatibility", () => {
       status: "confirmed",
       confidence: 80,
     });
+  });
+
+  it("replays a lost expedition that never deposited, salvage included, byte-for-byte", () => {
+    const starting = createCampaign({
+      contentVersion: CONTENT_VERSION,
+      expeditionDailyEventChancePermille: 0,
+    });
+    const final = runCommands(starting, [
+      { type: "start_expedition", runSeed: "wp4-salvage-replay" },
+      forwarded({ type: "set_lisbon_outfitting", allocation: { ...STANDARD_ALLOCATION, waterKg: 0 } }),
+      forwarded({ type: "depart_lisbon" }),
+      forwarded({ type: "set_heading", heading: "SW" }),
+      forwarded({ type: "advance_day" }),
+      forwarded({ type: "enter_cape_verde_port" }),
+      forwarded({ type: "purchase_cape_verde_rumour" }),
+      forwarded({ type: "leave_cape_verde_port" }),
+      forwarded({ type: "set_heading", heading: "S" }),
+      forwarded({ type: "advance_day" }),
+      forwarded({ type: "set_heading", heading: "E" }),
+      forwarded({ type: "advance_day" }),
+      forwarded({ type: "advance_day" }),
+      forwarded({ type: "advance_day" }),
+      { type: "finalize_expedition" },
+    ]);
+    const report = final.afterActionReports[0]!;
+    expect(report.outcome).toBe("objective_failure");
+    expect(report.reportSnapshotHash).toBeNull();
+    expect(report.factsSalvagedFromLog.length).toBeGreaterThan(0);
+    expect(report.factsSalvagedFromLog.every((fact) => fact.confidence <= 40)).toBe(true);
+    const replayed = replayCampaign(starting, createCampaignReplay(starting, final.replayCommands), {
+      environmentProvider: CAMPAIGN_ROUTE_ENVIRONMENT,
+    });
+    expect(canonicalCampaignState(replayed)).toBe(canonicalCampaignState(final));
+    expect(hashCampaignFacts(replayed)).toBe(hashCampaignFacts(final));
   });
 
   it("does not consume randomness through projection, reporting hashes, trace inspection, or serialization", () => {

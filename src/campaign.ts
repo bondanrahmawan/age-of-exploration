@@ -65,6 +65,8 @@ import {
 
 const DEFAULT_CAMPAIGN_DATE = "1488-04-01";
 const DEFAULT_EVENT_CHANCE_PERMILLE = 120;
+/** The ceiling word of mouth can put on a finding whose ship never came home. */
+const SALVAGED_LOG_CONFIDENCE_CAP = 40;
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
 
 function canonicalCopy<T>(value: Readonly<T>): T {
@@ -657,12 +659,20 @@ function currentDiscrepancyFacts(active: Readonly<ActiveExpedition>): readonly C
   return result;
 }
 
-function observedFacts(active: Readonly<ActiveExpedition>): readonly CampaignFact[] {
+/**
+ * What the crew has actually written down: journey facts and the navigation knowledge this
+ * expedition changed. The hidden-trace current derivation is deliberately absent, so this
+ * set is safe to count in front of the player while the voyage is still running.
+ */
+function loggedFacts(active: Readonly<ActiveExpedition>): readonly CampaignFact[] {
   return mergeCampaignFacts([
     ...active.journey.journey.facts.map((fact) => journeyFactToCampaignFact(fact, active.runNumber)),
     ...navigationObservationFacts(active),
-    ...currentDiscrepancyFacts(active),
   ]);
+}
+
+function observedFacts(active: Readonly<ActiveExpedition>): readonly CampaignFact[] {
+  return mergeCampaignFacts([...loggedFacts(active), ...currentDiscrepancyFacts(active)]);
 }
 
 function carriedFacts(active: Readonly<ActiveExpedition>): readonly CampaignFact[] {
@@ -850,6 +860,38 @@ function factsWithEvidenceOutside(
   });
 }
 
+/**
+ * What word of a lost expedition reaches Lisbon. Evidence no deposited copy holds is not
+ * struck off with the ship: it is entered at its own confidence or the salvage cap,
+ * whichever is lower, so a Cape seen once and lost leaves the next voyage somewhere to
+ * steer for instead of nothing. Capped at 40, salvaged evidence can never on its own reach
+ * the 70 that automatic navigation correction needs, and never completes the run objective.
+ * A claim the expedition disproved stays disproved rather than softening into a rumour.
+ * Word reaches Lisbon once per finding, not once per sighting, so repeated sightings inside
+ * one lost run cannot corroborate each other past the cap.
+ */
+function salvagedFacts(
+  facts: readonly Readonly<CampaignFact>[],
+  runNumber: number,
+  reportedDate: string,
+): readonly CampaignFact[] {
+  return mergeCampaignFacts(facts.map((fact) => {
+    const confidence = Math.min(fact.confidence, SALVAGED_LOG_CONFIDENCE_CAP);
+    return oneEvidenceFact(fact.id, fact.type, fact.locationOrRegion, {
+      evidenceId: `run.${String(runNumber).padStart(6, "0")}.salvaged.${fact.id}`,
+      runNumber,
+      claimedValue: canonicalCopy<CampaignClaimedValue>(fact.claimedValue),
+      source: `${fact.source}, salvaged from a lost expedition`,
+      confidence,
+      observedDate: fact.observedDate,
+      reportedDate,
+      status: fact.status === "disproved"
+        ? "disproved"
+        : confidence >= SALVAGED_LOG_CONFIDENCE_CAP ? "observed" : "rumoured",
+    });
+  }));
+}
+
 function factChanges(
   before: readonly Readonly<CampaignFact>[],
   after: readonly Readonly<CampaignFact>[],
@@ -889,6 +931,7 @@ function buildAfterActionReport(
   observed: readonly Readonly<CampaignFact>[],
   reported: readonly Readonly<CampaignFact>[],
   lost: readonly Readonly<CampaignFact>[],
+  salvaged: readonly Readonly<CampaignFact>[],
   changes: readonly Readonly<CampaignFactChange>[],
   campaignFactsAfter: readonly Readonly<CampaignFact>[],
 ): AfterActionReport {
@@ -913,6 +956,7 @@ function buildAfterActionReport(
     factsReported: canonicalCopy(reported),
     factsDisproved: canonicalCopy(observed.filter((fact) => fact.status === "disproved")),
     factsLostWithShip: canonicalCopy(lost),
+    factsSalvagedFromLog: canonicalCopy(salvaged),
     reportSnapshotDay: active.reportSnapshot?.committedDay ?? null,
     reportSnapshotHash: active.reportSnapshot?.snapshotHash ?? null,
     campaignFactsChanged: canonicalCopy(changes),
@@ -985,7 +1029,8 @@ function finalizeExpedition(
     : active.reportSnapshot?.facts ?? [];
   const reportedIds = evidenceIds(reported);
   const lost = factsWithEvidenceOutside(observed, reportedIds);
-  const campaignFactsAfter = mergeCampaignFacts([...state.facts, ...reported]);
+  const salvaged = salvagedFacts(lost, active.runNumber, active.journey.date);
+  const campaignFactsAfter = mergeCampaignFacts([...state.facts, ...reported, ...salvaged]);
   const changes = factChanges(state.facts, campaignFactsAfter);
   const report = buildAfterActionReport(
     active,
@@ -994,6 +1039,7 @@ function finalizeExpedition(
     observed,
     reported,
     lost,
+    salvaged,
     changes,
     campaignFactsAfter,
   );
@@ -1008,6 +1054,7 @@ function finalizeExpedition(
     objectiveAchieved: active.journey.journey.objectiveAchieved,
     reportedFactCount: reported.length,
     lostFactCount: lost.length,
+    salvagedFactCount: salvaged.length,
     reportSnapshotDay: active.reportSnapshot?.committedDay ?? null,
     reportSnapshotHash: active.reportSnapshot?.snapshotHash ?? null,
   };
@@ -1151,7 +1198,7 @@ function assertRunSummary(value: unknown, label: string): void {
   exactKeys(item, [
     "runNumber", "runSeed", "outcome", "reason", "departureDate", "finalDate",
     "elapsedCommittedDays", "objectiveAchieved", "reportedFactCount", "lostFactCount",
-    "reportSnapshotDay", "reportSnapshotHash",
+    "salvagedFactCount", "reportSnapshotDay", "reportSnapshotHash",
   ], label);
   integer(item["runNumber"], `${label}.runNumber`, 1, 1_000_000);
   stringValue(item["runSeed"], `${label}.runSeed`, 256);
@@ -1167,6 +1214,7 @@ function assertRunSummary(value: unknown, label: string): void {
   }
   integer(item["reportedFactCount"], `${label}.reportedFactCount`);
   integer(item["lostFactCount"], `${label}.lostFactCount`);
+  integer(item["salvagedFactCount"], `${label}.salvagedFactCount`);
   if (item["reportSnapshotDay"] !== null) integer(item["reportSnapshotDay"], `${label}.reportSnapshotDay`);
   nullableHash(item["reportSnapshotHash"], `${label}.reportSnapshotHash`);
   if ((item["reportSnapshotDay"] === null) !== (item["reportSnapshotHash"] === null)) {
@@ -1206,7 +1254,8 @@ function assertAfterActionReport(value: unknown, label: string): void {
     "format", "runNumber", "runSeed", "outcome", "reason", "departureDate", "finalDate",
     "elapsedCommittedDays", "objectiveStatus", "startingMetrics", "finalMetrics",
     "waterConsumedKg", "provisionsConsumedKg", "factsObserved", "factsReported",
-    "factsDisproved", "factsLostWithShip", "reportSnapshotDay", "reportSnapshotHash",
+    "factsDisproved", "factsLostWithShip", "factsSalvagedFromLog", "reportSnapshotDay",
+    "reportSnapshotHash",
     "campaignFactsChanged", "nextExpeditionDifferences", "estimatedTrack", "trueTrack",
     "uncertaintyHistory", "currentContributionHistory", "observationHistory",
   ], label);
@@ -1225,8 +1274,15 @@ function assertAfterActionReport(value: unknown, label: string): void {
   assertMetrics(item["finalMetrics"], `${label}.finalMetrics`);
   integer(item["waterConsumedKg"], `${label}.waterConsumedKg`);
   integer(item["provisionsConsumedKg"], `${label}.provisionsConsumedKg`);
-  for (const key of ["factsObserved", "factsReported", "factsDisproved", "factsLostWithShip"] as const) {
+  for (const key of [
+    "factsObserved", "factsReported", "factsDisproved", "factsLostWithShip", "factsSalvagedFromLog",
+  ] as const) {
     assertSortedFacts(item[key], `${label}.${key}`);
+  }
+  for (const fact of item["factsSalvagedFromLog"] as readonly CampaignFact[]) {
+    if (fact.confidence > SALVAGED_LOG_CONFIDENCE_CAP) {
+      throw new SimulationValidationError(`${label}.factsSalvagedFromLog exceeds the salvage confidence cap`);
+    }
   }
   if (item["reportSnapshotDay"] !== null) integer(item["reportSnapshotDay"], `${label}.reportSnapshotDay`);
   nullableHash(item["reportSnapshotHash"], `${label}.reportSnapshotHash`);
@@ -1518,6 +1574,9 @@ export function getCampaignPlayerView(state: Readonly<CampaignState>): CampaignP
   assertCampaignState(state);
   const active = state.activeExpedition;
   const snapshot = active?.reportSnapshot ?? null;
+  const unreported = active === null
+    ? []
+    : factsWithEvidenceOutside(loggedFacts(active), evidenceIds(snapshot?.facts ?? []));
   return deepFreeze({
     contentVersion: state.contentVersion,
     currentRunNumber: active?.runNumber ?? null,
@@ -1528,6 +1587,7 @@ export function getCampaignPlayerView(state: Readonly<CampaignState>): CampaignP
       deposited: snapshot !== null,
       date: snapshot?.date ?? null,
       factCount: snapshot?.facts.length ?? 0,
+      unreportedFactCount: unreported.length,
     },
     afterActionReports: canonicalCopy(state.afterActionReports),
   }) as CampaignPlayerView;

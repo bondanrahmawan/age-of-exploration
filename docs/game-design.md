@@ -1745,26 +1745,39 @@ Observation rules:
 
 **East-west observation.** Longitude has no daily equivalent of the noon sight, so without a deliberate order the east-west radius only ever grows until a recognised landmark fixes it. The player may therefore order a full day of observation instead of a day's sailing. The ship makes no commanded run; current, leeway, and weather still apply, stores are consumed normally, and the noon sight resolves as usual.
 
-The observation reports a **bracket**, never a position. It is resolved from the true distance to the authored African shelf:
+The observation reports a **bracket**, never a position. The tier is resolved from the true distance to the authored African shelf, and each tier has an entry bracket and a floor:
 
 ```text
-true distance to the shelf     result           east-west radius
-≤ 300 nm                       shoaling water   capped at 200 nm
-≤ 900 nm                       land signs       capped at 600 nm
-beyond                         open ocean       unchanged
+true distance to the shelf     result           entry bracket   floor
+≤ 300 nm                       shoaling water   200 nm          80 nm
+≤ 900 nm                       land signs       600 nm          300 nm
+beyond                         open ocean       none            none
 ```
 
-Where a bracket applies, the estimate's east-west coordinate is clamped into the bracket either side of the truth, and the east-west radius is capped at the bracket width. The operation may narrow the radius and may move the estimate; it may never widen the radius, never move the estimate away from the truth, and never move the true ship.
+First contact with a tier establishes its entry bracket. Ordering the observation again while the ship is still in the same tier closes a third of the distance remaining between the present bracket and that tier's floor, never stepping less than 5 nm and never passing the floor. Sustained coastal work therefore keeps paying at a diminishing rate and terminates at a hard bound the crew can never beat.
+
+Where a bracket applies, the estimate's east-west coordinate is clamped into that bracket either side of the truth, and the east-west radius is capped at the bracket width. The operation may narrow the radius and may move the estimate; it may never widen the radius, never move the estimate away from the truth, and never move the true ship.
+
+An observation that cannot buy anything is **refused before the day is spent**. Two conditions refuse it, and both are decided from state the player can already see — the radius drawn on the chart and the last committed day — so the interface greys the order out for exactly the reason the engine would reject it:
+
+```text
+condition                                                    refusal
+east-west radius already ≤ the narrowest floor (80 nm)       no tier anywhere can better it
+the last committed day was an observation that gained        the ship has made no run since,
+nothing                                                      so the same ground is still the answer
+```
 
 These rules are **CONTRACT**:
 
-- The distances, bracket widths, and any cost beyond the day itself are **TUNING**. The existence of a deliberate, player-ordered, costed east-west channel is not.
-- The bracket width disclosed to the player is exactly the east-west radius already drawn on the chart, so the observation reveals nothing the interface does not already show. The amount of the correction and its bound must both be visible and explicable.
-- Open ocean returns no correction at all. Repeating the observation offshore must never converge on a longitude, because §9.2 holds: at sea, longitude error only ever grows. The band narrows only as land approaches.
-- A fruitless observation is still information, and must be logged as such: it establishes that no known coast lies within the outer distance.
+- The distances, bracket widths, floors, the fraction closed per repeat, the minimum step, and any cost beyond the day itself are **TUNING**. The existence of a deliberate, player-ordered, costed east-west channel is not, and neither is the existence of a hard per-tier floor.
+- The floor is coastal recognition running out of resolution, not longitude becoming measurable. A pilot can tell one stretch of shelf from another only so well, because the shelf looks much the same for a long way. The tier is chosen by where the ship truly is, never by how many days the crew has spent looking, so no amount of effort can improve on standing closer to land.
+- No bracket disclosed to the player is ever tighter than the east-west radius already drawn on the chart, so the observation reveals nothing the interface does not already show. The amount of the correction and its bound must both be visible and explicable. The floors are public numbers.
+- Open ocean returns no correction at all. Repeating the observation offshore must never converge on a longitude, because §9.2 holds: at sea, longitude error only ever grows. The band narrows only as land approaches, and only down to the floor of the tier the ship is actually in.
+- A fruitless observation is still information the first time, and must be logged as such: it establishes that no known coast lies within the outer distance. Repeating it from the same standing is not information, and is refused rather than logged.
+- A refused observation consumes no day, no stores, and no morale, and leaves every byte of state and all three PRNG streams untouched.
 - The observation changes neither sight radius nor landfall geometry. A ship may still pass the objective's charted position and miss it.
 - An observation day may recognise a landmark and take its fix, but only a sailing day can arrive home and resolve the run. A day that makes no run cannot complete a voyage.
-- Every observation day and its result are recorded in the canonical log and in the after-action report, so a run can be explained afterwards.
+- Every observation day and its result are recorded in the canonical log and in the after-action report, and a day that failed to narrow the band must read as such rather than as silence, so a run can be explained afterwards.
 
 The chart automatically records the estimated track. The player does not manually draw coordinate points in the base game.
 
@@ -1960,13 +1973,15 @@ When a recognised landfall reveals at least 50 nm of sustained east–west discr
 Persistence rule:
 
 - Returning to Lisbon reports every eligible fact in the carried log.
-- Depositing a report at Cape Verde creates a snapshot of eligible facts known at that moment.
-- If the ship is later lost, only the last deposited snapshot persists.
-- Unreported observations disappear with the expedition.
-- A disproved rumour remains on record as disproved; it is not silently deleted.
+- Depositing a report at Cape Verde creates a snapshot of eligible facts known at that moment. The port is entered from a recognised Cape Verde landfall, outbound or homebound, so a ship that routes home past the island can always deposit a second time.
+- If the ship is later lost, the last deposited snapshot persists at full strength.
+- Observations made after the last deposit are not erased with the ship. Word of them reaches Lisbon as a salvaged log: one piece of evidence per finding, entered at its own confidence or 40, whichever is lower. Salvaged evidence therefore never on its own reaches the 70 that automatic navigation correction requires, and never completes the run objective.
+- A disproved rumour remains on record as disproved, whether reported or salvaged; it is not silently deleted.
 - Starting a new expedition loads only reported facts and prior run summaries, never hidden truth.
 
-This report-deposit rule is the base game's implementation of “failure can still buy knowledge.” Lifeboats, passing ships, caches, and surviving officers are deferred.
+The salvage cap of 40 is **TUNING**. That a lost expedition degrades its unreported record rather than erasing it, that a deposited report is strictly stronger than salvage of the same finding, and that salvage alone cannot confirm a fact or complete the objective, are **CONTRACT**.
+
+The report deposit and the salvaged log beneath it are the base game's implementation of “failure can still buy knowledge”: the deposit is what a well-run failure banks, and salvage is the floor under every other one, so no voyage that learned something moves the chart by nothing. Lifeboats, passing ships, and caches remain deferred — salvage is a confidence rule, not a modelled survivor.
 
 ### 34.11 Run Outcomes and After-Action Report
 
@@ -1985,7 +2000,8 @@ The after-action report must show:
 - Crew and ship condition.
 - Days elapsed and stores consumed.
 - Objective status.
-- Facts observed, reported, disproved, and lost with the ship.
+- Facts observed, reported, disproved, lost with the ship, and salvaged from the log at reduced confidence.
+- What the written record stands to lose while the voyage is still running, not only in the post-mortem: how many findings ride on an undeposited log, and what a deposited copy already holds.
 - Estimated track versus true track, with the hidden current's contribution explained only where evidence supports it.
 - Every east-west observation day: when it was spent, what it returned, and what it did to the east–west radius.
 - Differences that will appear in the next expedition.
@@ -2041,7 +2057,7 @@ one authored wind field and one initially hidden current
 water, provisions, repair stores, medicine
 pooled crew health and morale
 hull, mast, sails, rudder
-Cape Verde port and report deposit
+Cape Verde port, report deposit, and the salvaged log
 Cape landfall and optional water-source discovery
 fouling and spoilage on the return
 20+ authored events

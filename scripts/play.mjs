@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 export const APP_ID = "age-of-exploration";
 export const LAUNCHER_PROTOCOL = 1;
-export const CONTENT_VERSION = "base-game-v2";
+export const CONTENT_VERSION = "base-game-v3";
 export const HEALTH_PATH = "/__age-of-exploration/health";
 
 const BUILD_MANIFEST_FORMAT = "age-of-exploration-launcher-build-v1";

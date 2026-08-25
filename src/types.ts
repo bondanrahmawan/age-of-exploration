@@ -919,6 +919,8 @@ export interface JourneyFixtureConfig extends JourneyInitialStateConfig {
   readonly location?: JourneyLocation;
   readonly truePosition?: PositionMnm;
   readonly estimatedPosition?: PositionMnm;
+  /** Starting error ellipse, for fixtures that need a band already open at sea. */
+  readonly uncertainty?: UncertaintyRadiiMnm;
   readonly waterKg?: number;
   readonly provisionsKg?: number;
   readonly repairStoresKg?: number;

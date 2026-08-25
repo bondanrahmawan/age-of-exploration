@@ -1,11 +1,13 @@
 import {
   AUTHORED_EVENTS,
+  EAST_WEST_OBSERVATION_TIERS,
   HEADINGS,
   SAILING_POLICIES,
   RATION_POLICIES,
   SHIP_COMPONENTS,
   STORE_KINDS,
   SURVIVAL_TUNING,
+  eastWestObservationRefusal,
   lisbonOutfittingCost,
   type AfterActionReport,
   type CampaignFact,
@@ -64,6 +66,7 @@ export interface RunSummaryViewModel {
   readonly objectiveAchieved: boolean;
   readonly reportedFactCount: number;
   readonly lostFactCount: number;
+  readonly salvagedFactCount: number;
 }
 
 export interface OutfittingValidation {
@@ -147,6 +150,7 @@ export interface LogEntryViewModel {
 
 export interface ExpeditionViewModel {
   readonly mission: MissionProgressViewModel;
+  readonly record: RecordStakesViewModel;
   readonly chart: ChartViewModel;
   readonly deck: DeckViewModel;
   readonly log: readonly LogEntryViewModel[];
@@ -159,6 +163,18 @@ export interface ExpeditionViewModel {
 export interface MissionProgressViewModel {
   readonly milestone: string;
   readonly status: string;
+}
+
+/**
+ * What the written record stands to lose today. Shown on deck and in port rather than kept
+ * for the post-mortem, because a player who cannot see findings riding on an undeposited
+ * log cannot decide to go and deposit it.
+ */
+export interface RecordStakesViewModel {
+  readonly headline: string;
+  readonly detail: string;
+  readonly atRisk: number;
+  readonly deposited: boolean;
 }
 
 export interface ChoiceViewModel {
@@ -177,6 +193,7 @@ export interface InterruptViewModel {
   readonly date: string;
   readonly elapsedDays: number;
   readonly mission: MissionProgressViewModel;
+  readonly record: RecordStakesViewModel;
   readonly lastResult: LogEntryViewModel | null;
   readonly choices: readonly ChoiceViewModel[];
   readonly location: string;
@@ -239,6 +256,7 @@ export interface ReportViewModel {
   readonly factsReported: readonly FactViewModel[];
   readonly factsDisproved: readonly FactViewModel[];
   readonly factsLost: readonly FactViewModel[];
+  readonly factsSalvaged: readonly FactViewModel[];
   readonly reportSnapshotDay: number | null;
   readonly estimatedTrack: readonly ChartPointViewModel[];
   readonly trueTrack: readonly ChartPointViewModel[];
@@ -301,6 +319,7 @@ function runSummaryView(summary: Readonly<CampaignRunSummary>): RunSummaryViewMo
     objectiveAchieved: summary.objectiveAchieved,
     reportedFactCount: summary.reportedFactCount,
     lostFactCount: summary.lostFactCount,
+    salvagedFactCount: summary.salvagedFactCount,
   };
 }
 
@@ -394,16 +413,16 @@ const nauticalMiles = (mnm: number) => `${Math.round(mnm / 1_000)} nm`;
  */
 function observationSentence(activity: Readonly<EastWestObservationActivity>): string {
   const narrowed = activity.eastWestUncertaintyAfterMnm < activity.eastWestUncertaintyBeforeMnm
-    ? ` The east-west band narrowed from ${nauticalMiles(activity.eastWestUncertaintyBeforeMnm)} to ${nauticalMiles(activity.eastWestUncertaintyAfterMnm)}.`
-    : ` The east-west band was already inside that bracket at ${nauticalMiles(activity.eastWestUncertaintyAfterMnm)}, so nothing changed.`;
+    ? ` The east-west band closed from ${nauticalMiles(activity.eastWestUncertaintyBeforeMnm)} to ${nauticalMiles(activity.eastWestUncertaintyAfterMnm)}.`
+    : ` The east-west band stayed at ${nauticalMiles(activity.eastWestUncertaintyAfterMnm)}: this ground has nothing further to tell, and another day here would buy nothing.`;
   const shifted = activity.estimateCorrectionMnm === 0
     ? ""
     : ` The reckoning was moved ${nauticalMiles(Math.abs(activity.estimateCorrectionMnm))} ${activity.estimateCorrectionMnm > 0 ? "east" : "west"}.`;
   switch (activity.result.kind) {
     case "shoaling_water":
-      return ` The lead found shoaling water and the birds held a steady quarter, placing the ship within 200 nm of the coast east and west.${narrowed}${shifted}`;
+      return ` The lead found shoaling water and brought up sand, and the birds held a steady quarter.${narrowed}${shifted}`;
     case "land_signs":
-      return ` No bottom, but weed and land birds put a coast somewhere to the east, within 600 nm.${narrowed}${shifted}`;
+      return ` No bottom, but weed and land birds put a coast somewhere to the east.${narrowed}${shifted}`;
     case "open_ocean":
       return " No bottom at a hundred fathom and no sign of land. The ship is more than 900 nm from any coast the crew knows, and the day bought nothing but that.";
     case "none":
@@ -497,6 +516,11 @@ function logEntry(entry: Readonly<CanonicalLogEntry>): LogEntryViewModel {
   };
 }
 
+/** The best band the named observation ground can ever establish, or null for open ocean. */
+function eastWestObservationTierFloor(kind: string): number | null {
+  return EAST_WEST_OBSERVATION_TIERS.find((tier) => tier.kind === kind)?.floorMnm ?? null;
+}
+
 /**
  * A short standing summary of what the last east-west observation established, so the
  * player can read the present bracket off the deck without hunting through the log.
@@ -511,8 +535,14 @@ function lastObservationSummary(active: Readonly<JourneyPlayerView>): string {
     && latest.activity.kind === "east_west_observation"
     ? ` on day ${latest.committedDay}, band ${nauticalMiles(latest.activity.eastWestUncertaintyAfterMnm)}`
     : "";
-  if (kind === "shoaling_water") return `Shoaling water${detail}. A coast lies within 200 nm east or west.`;
-  if (kind === "land_signs") return `Land signs${detail}. A coast lies within 600 nm to the east.`;
+  const floor = eastWestObservationTierFloor(kind);
+  const more = floor === null
+    ? ""
+    : active.uncertainty.eastWestMnm <= floor
+      ? ` Working this ground further cannot better ${nauticalMiles(floor)}.`
+      : ` Working the same ground again closes the band further, down to ${nauticalMiles(floor)} at best.`;
+  if (kind === "shoaling_water") return `Shoaling water${detail}. A coast lies within 200 nm east or west.${more}`;
+  if (kind === "land_signs") return `Land signs${detail}. A coast lies within 600 nm to the east.${more}`;
   return `Open ocean${detail}. No coast within 900 nm.`;
 }
 
@@ -522,7 +552,7 @@ function observationBlockedReason(active: Readonly<JourneyPlayerView>): string |
   if (active.journey.pendingEvent !== null) return "Answer the decision first.";
   if (active.journey.location !== "at_sea") return "Only at sea.";
   if (active.survival.status.kind !== "active") return "The ship cannot work the day.";
-  return null;
+  return eastWestObservationRefusal(active.uncertainty, active.log);
 }
 
 const OBSERVATION_WORDS: Record<string, string> = {
@@ -536,7 +566,7 @@ function observationHistoryLine(point: Readonly<ObservationHistoryPoint>): strin
   const what = OBSERVATION_WORDS[point.result] ?? point.result;
   const narrowed = point.eastWestUncertaintyAfterMnm < point.eastWestUncertaintyBeforeMnm
     ? `the east-west band closed from ${nauticalMiles(point.eastWestUncertaintyBeforeMnm)} to ${nauticalMiles(point.eastWestUncertaintyAfterMnm)}`
-    : `the east-west band stayed at ${nauticalMiles(point.eastWestUncertaintyAfterMnm)}`;
+    : `the east-west band stayed at ${nauticalMiles(point.eastWestUncertaintyAfterMnm)} and the day bought nothing`;
   const moved = point.estimateCorrectionMnm === 0
     ? ""
     : `, and the reckoning shifted ${nauticalMiles(Math.abs(point.estimateCorrectionMnm))} ${point.estimateCorrectionMnm > 0 ? "east" : "west"}`;
@@ -562,7 +592,34 @@ function missionProgress(active: Readonly<JourneyPlayerView>): MissionProgressVi
   return { milestone, status };
 }
 
-function buildExpedition(active: Readonly<JourneyPlayerView>): ExpeditionViewModel {
+function recordStakes(deposit: Readonly<CampaignPlayerView["depositedReport"]>): RecordStakesViewModel {
+  const atRisk = deposit.unreportedFactCount;
+  const findings = atRisk === 1 ? "1 finding rides" : `${atRisk} findings ride`;
+  const copy = deposit.deposited
+    ? `The copy left at Cape Verde on ${deposit.date} holds ${deposit.factCount}.`
+    : "No copy has been left ashore.";
+  if (atRisk === 0) {
+    return {
+      headline: deposit.deposited ? "A copy is safe ashore" : "Nothing yet to lose",
+      detail: deposit.deposited
+        ? `${copy} Nothing has been found since.`
+        : "The crew has found nothing this voyage that the chart does not already hold.",
+      atRisk,
+      deposited: deposit.deposited,
+    };
+  }
+  return {
+    headline: `${findings} only aboard`,
+    detail: `${copy} If the ship does not come home, ${deposit.deposited ? "the rest" : "they"} reach Lisbon as hearsay at best.`,
+    atRisk,
+    deposited: deposit.deposited,
+  };
+}
+
+function buildExpedition(
+  active: Readonly<JourneyPlayerView>,
+  deposit: Readonly<CampaignPlayerView["depositedReport"]>,
+): ExpeditionViewModel {
   const track = estimatedTrack(active);
   const safeLog = active.log.map(logEntry).reverse();
   const landmarkLabel = (id: string) => id.includes("cape-verde") ? "Cape Verde / Santiago"
@@ -583,6 +640,7 @@ function buildExpedition(active: Readonly<JourneyPlayerView>): ExpeditionViewMod
   const observedWind = `${active.navigation.observedWind.strength} wind from ${active.navigation.observedWind.fromHeading ?? "variable"}`;
   return {
     mission: missionProgress(active),
+    record: recordStakes(deposit),
     chart: {
       estimatedPosition: {
         day: active.committedDay,
@@ -727,7 +785,10 @@ function isActionlessDeckWarning(active: Readonly<JourneyPlayerView>): boolean {
     && !deckWarningHasResponse(active);
 }
 
-function buildInterrupt(active: Readonly<JourneyPlayerView>, reportDeposited: boolean): InterruptViewModel | null {
+function buildInterrupt(
+  active: Readonly<JourneyPlayerView>,
+  deposit: Readonly<CampaignPlayerView["depositedReport"]>,
+): InterruptViewModel | null {
   if (isActionlessDeckWarning(active)) return null;
   const pending = active.journey.pendingEvent;
   let kind: InterruptViewModel["kind"];
@@ -770,6 +831,7 @@ function buildInterrupt(active: Readonly<JourneyPlayerView>, reportDeposited: bo
     date: active.date,
     elapsedDays: active.committedDay,
     mission: missionProgress(active),
+    record: recordStakes(deposit),
     lastResult: active.log.length === 0 ? null : logEntry(active.log.at(-1)!),
     choices: buildEventChoices(active),
     location: active.journey.location,
@@ -781,7 +843,7 @@ function buildInterrupt(active: Readonly<JourneyPlayerView>, reportDeposited: bo
     careeningDaysCompleted: active.survival.careeningDaysCompleted,
     foulingSpeedLossBps: active.survival.foulingSpeedLossBps,
     rumourPurchased: active.journey.rumourPurchased,
-    reportDeposited,
+    reportDeposited: deposit.deposited,
     capeSurveyDaysCompleted: active.journey.capeSurveyDaysCompleted,
     capeSurveyed: active.journey.surveyedLandmarkIds.length > 0,
     capeWaterKnown: capeWater !== undefined && capeWater.status !== "disproved" && capeWater.confidence >= 40,
@@ -885,6 +947,7 @@ function routeExplanationSummary(lines: readonly RouteExplanationViewModel[]): s
 
 function buildReport(report: Readonly<AfterActionReport>): ReportViewModel {
   const currentExplanations = routeExplanations(report.currentContributionHistory);
+  const salvagedIds = new Set(report.factsSalvagedFromLog.map((fact) => fact.id));
   return {
     runNumber: report.runNumber,
     outcome: titleCase(report.outcome),
@@ -899,7 +962,10 @@ function buildReport(report: Readonly<AfterActionReport>): ReportViewModel {
     factsObserved: report.factsObserved.map(campaignFactView),
     factsReported: report.factsReported.map(campaignFactView),
     factsDisproved: report.factsDisproved.map(campaignFactView),
-    factsLost: report.factsLostWithShip.map(campaignFactView),
+    factsLost: report.factsLostWithShip
+      .filter((fact) => !salvagedIds.has(fact.id))
+      .map(campaignFactView),
+    factsSalvaged: report.factsSalvagedFromLog.map(campaignFactView),
     reportSnapshotDay: report.reportSnapshotDay,
     estimatedTrack: reportTrack(report.estimatedTrack),
     trueTrack: reportTrack(report.trueTrack),
@@ -935,7 +1001,7 @@ export function buildAppViewModel(
   options: Readonly<AppViewBuildOptions>,
 ): AppViewModel {
   const active = campaign.activeRun;
-  const activeInterrupt = active === null ? null : buildInterrupt(active, campaign.depositedReport.deposited);
+  const activeInterrupt = active === null ? null : buildInterrupt(active, campaign.depositedReport);
   let screen: ProductScreen;
   if (active === null) {
     screen = campaign.afterActionReports.length > 0 ? "after_action" : "outfitting";
@@ -963,7 +1029,9 @@ export function buildAppViewModel(
       priorRuns: campaign.priorRunSummaries.map(runSummaryView),
       campaignReady: active !== null,
     } : null,
-    expedition: active === null || (screen !== "expedition" && screen !== "interrupt") ? null : buildExpedition(active),
+    expedition: active === null || (screen !== "expedition" && screen !== "interrupt")
+      ? null
+      : buildExpedition(active, campaign.depositedReport),
     interrupt: screen === "interrupt" ? activeInterrupt : null,
     report: latestReport === null ? null : buildReport(latestReport),
   };

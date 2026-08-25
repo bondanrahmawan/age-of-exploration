@@ -9,10 +9,17 @@ import { InterruptScreen } from "../app/components/InterruptScreen.js";
 import { GameController, type GameActions } from "../app/controller.js";
 import { FixedSeedSource } from "../app/seed.js";
 import { CAMPAIGN_SAVE_KEY, CampaignSaveRepository, MemoryKeyValueStorage, PreferenceRepository } from "../app/storage.js";
-import type { InterruptViewModel, ReportViewModel } from "../app/view-model.js";
+import type { InterruptViewModel, RecordStakesViewModel, ReportViewModel } from "../app/view-model.js";
 import { CAMPAIGN_ROUTE_ENVIRONMENT, NO_MOVEMENT_ENVIRONMENT } from "./campaign-test-helpers.js";
 
 afterEach(() => cleanup());
+
+const NOTHING_AT_RISK: RecordStakesViewModel = {
+  headline: "Nothing yet to lose",
+  detail: "The crew has found nothing this voyage that the chart does not already hold.",
+  atRisk: 0,
+  deposited: false,
+};
 
 function controller(storage = new MemoryKeyValueStorage()) {
   return new GameController(
@@ -121,6 +128,7 @@ describe("WP5 accessible product surfaces", () => {
         date: "1488-04-02",
         elapsedDays: 1,
         mission: { milestone: "Reach or use Cape Verde", status: "Cape recognition is still required." },
+        record: NOTHING_AT_RISK,
         lastResult: null,
         choices,
         location: "at_sea",
@@ -159,7 +167,8 @@ describe("WP5 accessible product surfaces", () => {
     } as unknown as GameActions;
     const base: InterruptViewModel = {
       kind: "cape_verde", title: "Cape Verde", description: "Port", choices: [], location: "cape_verde",
-      date: "1488-04-02", elapsedDays: 1, mission: { milestone: "Use Cape Verde and choose the next leg", status: "Cape recognition is still required." }, lastResult: null,
+      date: "1488-04-02", elapsedDays: 1, mission: { milestone: "Use Cape Verde and choose the next leg", status: "Cape recognition is still required." },
+      record: NOTHING_AT_RISK, lastResult: null,
       stores: { waterKg: 1_000, provisionsKg: 1_000, repairStoresKg: 1_000, medicineKg: 0 },
       stock: { waterKg: 24_000, provisionsKg: 12_000, repairStoresKg: 4_000, medicineKg: 500 }, moneyDucats: 100,
       ship: { hullBps: 9_000, mastBps: 9_000, sailsBps: 9_000, rudderBps: 9_000 }, crew: { count: 25, able: 25, healthBps: 9_000, moraleBps: 7_500 },
@@ -247,6 +256,7 @@ describe("WP5 accessible product surfaces", () => {
       factsReported: [],
       factsDisproved: [],
       factsLost: [],
+      factsSalvaged: [],
       reportSnapshotDay: null,
       estimatedTrack: [],
       trueTrack: [],
@@ -270,6 +280,106 @@ describe("WP5 accessible product surfaces", () => {
     expect(section.querySelectorAll("li")).toHaveLength(3);
     expect(within(section).getByText(/Day 27: reported evidence supports/)).toBeTruthy();
     expect(within(section).getByText("Days 28-187: route divergence unexplained (160 days).")).toBeTruthy();
+  });
+
+  it("briefs Cape Verde as a working port, a report drop, and what carried ducats are for", () => {
+    const game = controller();
+    render(<App controller={game} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start a new campaign" }));
+    const briefing = screen.getByText(/Cape Verde lies on the way out and on the way back/);
+    expect(briefing.textContent).toContain("sells water, provisions, repair stores and medicine");
+    expect(briefing.textContent).toContain("ducats you do not spend here");
+    expect(briefing.textContent).toContain("a copy left there outlives the ship");
+    expect(briefing.textContent).toContain("hearsay");
+    expect(screen.getByText(/Ducats you do not spend here are what buys resupply at Cape Verde/)).toBeTruthy();
+    // A briefing, not a chart: no hidden truth may reach the outfitting screen.
+    for (const forbidden of ["truePosition", "hiddenTrace", "trueCurrent", "eventPrng"]) {
+      expect(document.body.innerHTML).not.toContain(forbidden);
+    }
+  });
+
+  it("shows findings riding on an undeposited log while the voyage is still running", () => {
+    const game = resumed(createCampaignFixtureState({
+      contentVersion: "base-game-v2",
+      runSeed: "dom-at-risk",
+      journey: {
+        location: "at_sea",
+        truePosition: { xMnm: -300_000, yMnm: -1_000_000 },
+        estimatedPosition: { xMnm: -300_000, yMnm: -1_000_000 },
+        dailyEventChancePermille: 0,
+        facts: [{
+          id: "fact.riding-aboard",
+          type: "anchorage",
+          status: "observed",
+          confidence: 55,
+          source: "dom fixture",
+          observedDate: "1488-04-01",
+          claim: "A sheltered anchorage, seen once and not yet reported.",
+        }],
+      },
+    }));
+    render(<App controller={game} />);
+    const record = screen.getByText("1 finding rides only aboard");
+    expect(record).toBeTruthy();
+    expect(screen.getByText(/No copy has been left ashore/)).toBeTruthy();
+    expect(screen.getByText(/reach Lisbon as hearsay at best/)).toBeTruthy();
+    expect(record.closest(".record-summary")?.className).toContain("record-at-risk");
+  });
+
+  it("names what a deposit would save on the Cape Verde port screen", () => {
+    const game = resumed(createCampaignFixtureState({
+      contentVersion: "base-game-v2",
+      runSeed: "dom-deposit-stakes",
+      journey: {
+        location: "cape_verde",
+        dailyEventChancePermille: 0,
+        facts: [{
+          id: "fact.port-side-finding",
+          type: "anchorage",
+          status: "observed",
+          confidence: 55,
+          source: "dom fixture",
+          observedDate: "1488-04-01",
+          claim: "A finding the port could keep safe.",
+        }],
+      },
+    }));
+    render(<App controller={game} />);
+    const deposit = screen.getByRole("button", { name: /Leave a copy of the report/ });
+    expect(deposit.textContent).toContain("Puts 1 finding beyond the sea’s reach");
+    expect(deposit.textContent).toContain("Nothing is ashore yet.");
+    fireEvent.click(deposit);
+    expect(screen.getByRole("button", { name: /Leave a copy of the report/ }).textContent)
+      .toContain("The copy already here holds everything the crew knows.");
+  });
+
+  it("separates salvaged findings from findings lost outright in the after-action report", () => {
+    let state = createCampaignFixtureState({
+      contentVersion: "base-game-v2",
+      runSeed: "dom-salvage-report",
+      journey: {
+        location: "cape_verde",
+        hullBps: 0,
+        dailyEventChancePermille: 0,
+        facts: [{
+          id: "fact.salvaged-anchorage",
+          type: "anchorage",
+          status: "observed",
+          confidence: 55,
+          source: "dom fixture",
+          observedDate: "1488-04-01",
+          claim: "An anchorage word of which outlived the ship.",
+        }],
+      },
+    });
+    state = executeForwardedSimulationCommand(state, { type: "careen_day_at_cape_verde" }, NO_MOVEMENT_ENVIRONMENT);
+    state = executeForwardedSimulationCommand(state, { type: "careen_day_at_cape_verde" }, NO_MOVEMENT_ENVIRONMENT);
+    state = executeCampaignCommand(state, { type: "finalize_expedition" });
+    render(<App controller={resumed(state)} />);
+    expect(screen.getByRole("heading", { name: "Salvaged from the log" })).toBeTruthy();
+    expect(screen.getByText(/each stands at reduced confidence/)).toBeTruthy();
+    expect(screen.getByText("Nothing the crew saw was lost outright.")).toBeTruthy();
+    expect(screen.getAllByText(/40%/).length).toBeGreaterThan(0);
   });
 
   it("renders actual-track comparison only after the campaign is finalized", () => {

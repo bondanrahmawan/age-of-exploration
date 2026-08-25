@@ -65,7 +65,12 @@ export function AfterActionScreen({ report, autosaveBoundary, controller }: { re
         <FactSection title="Seen at sea" facts={report.factsObserved} emptyText="The crew saw nothing new." />
         <FactSection title="Reached the chart" facts={report.factsReported} emptyText="Nothing new reached the campaign chart." />
         <FactSection title="Proved wrong" facts={report.factsDisproved} emptyText="No rumour was proved wrong." />
-        <FactSection title="Lost with the ship" facts={report.factsLost} emptyText="Nothing the crew saw was lost." />
+        <FactSection title="Lost outright" facts={report.factsLost} emptyText="Nothing the crew saw was lost outright." />
+        <section class="report-fact-section">
+          <h3>Salvaged from the log</h3>
+          <p>Word of these reached Lisbon without the ship, so each stands at reduced confidence — enough to steer for, never enough to correct the reckoning by itself.</p>
+          <FactList facts={report.factsSalvaged} emptyText="Nothing needed salvaging." />
+        </section>
       </section>
 
       <section class="next-expedition-card" aria-labelledby="next-run-title">

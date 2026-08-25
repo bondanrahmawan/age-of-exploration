@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { renderDebugChart } from "../debug/chart.mjs";
 import {
+  EAST_WEST_OBSERVATION_FLOOR_MNM,
   JOURNEY_REPLAY_FORMAT,
   JOURNEY_SAVE_FORMAT,
   NAVIGATION_SAVE_FORMAT,
@@ -14,6 +15,7 @@ import {
   createJourneyState,
   createNavigationState,
   createReplay,
+  createJourneyFixtureState,
   createSurvivalState,
   deserializeSave,
   getPlayerView,
@@ -21,6 +23,7 @@ import {
   hashState,
   replay,
   serializeSave,
+  type EnvironmentProvider,
   type JourneySimulationState,
   type SimulationCommand,
   type SimulationState,
@@ -70,6 +73,86 @@ function prefixToPending(start = journeyStart()) {
   if (available === undefined) throw new Error("pending fixture has no available choice");
   return { state, commands, choice: { type: "choose_event", eventId: pending.eventId, choiceId: available.id } as const };
 }
+
+/** Shelf water, no commanded run, and no uncertainty growth, so a bracket converges alone. */
+const SHELF_STILL_ENVIRONMENT: EnvironmentProvider = (context) => {
+  if (context.navigation === null) throw new Error("journey fixture requires navigation state");
+  return {
+    schema: "wp1-navigation-environment-v1",
+    id: "wp3-determinism:shelf-still",
+    pointOfSailPermille: 0,
+    weatherPermille: 0,
+    uncertaintyPermille: 0,
+    tackingUncertaintyPermille: 0,
+    trueCurrentMnm: { xMnm: 0, yMnm: 0 },
+    knownCurrentMnm: { xMnm: 0, yMnm: 0 },
+    leewayMnm: { xMnm: 0, yMnm: 0 },
+    observedWeather: "fair_clear",
+    observedWind: { directionConvention: "from", fromHeading: "NE", strength: "moderate" },
+    noonObservation: "none",
+    sightRadiusMnm: 20_000,
+    nextWeatherState: { kind: "fair_clear", daysInState: context.navigation.weatherState.daysInState + 1 },
+    nextEnvironmentPrng: context.navigation.environmentPrng,
+  };
+};
+
+/** True shoaling water off the authored African shelf. */
+const SHOALING = { xMnm: 1_150_000, yMnm: -3_000_000 };
+
+function observationRun(days: number): JourneySimulationState {
+  const start = createJourneyFixtureState({
+    contentVersion: "wp3-authored-journey-v2",
+    runSeed: "wp3-east-west-convergence",
+    location: "at_sea",
+    truePosition: SHOALING,
+    estimatedPosition: SHOALING,
+    uncertainty: { eastWestMnm: 900_000, northSouthMnm: 20_000 },
+    dailyEventChancePermille: 0,
+  });
+  let state = start;
+  for (let index = 0; index < days; index += 1) {
+    state = applyCommand(state, { type: "observation_day" }, SHELF_STILL_ENVIRONMENT) as JourneySimulationState;
+  }
+  return state;
+}
+
+describe("WP3 east-west observation determinism", () => {
+  it("converges a worked bracket to the same bytes every run and stops on the floor", () => {
+    const first = observationRun(10);
+    const second = observationRun(10);
+    expect(canonicalState(first)).toBe(canonicalState(second));
+    expect(canonicalize(first.canonicalLog)).toBe(canonicalize(second.canonicalLog));
+    expect(hashState(first)).toBe(hashState(second));
+    expect(hashEventLog(first)).toBe(hashEventLog(second));
+
+    const bands = first.canonicalLog.flatMap((entry) =>
+      entry.type === "journey_day" && entry.activity.kind === "east_west_observation"
+        ? [entry.activity.eastWestUncertaintyAfterMnm]
+        : []);
+    expect(bands).toEqual([
+      200_000, 160_040, 133_387, 115_609, 103_751, 95_842, 90_567, 85_567, 80_567, 80_000,
+    ]);
+    for (const band of bands) expect(band).toBeGreaterThanOrEqual(EAST_WEST_OBSERVATION_FLOOR_MNM);
+    expect(first.uncertainty.eastWestMnm).toBe(EAST_WEST_OBSERVATION_FLOOR_MNM);
+  });
+
+  it("leaves every byte and all three PRNG streams unchanged when an observation is refused", () => {
+    const state = observationRun(10);
+    const bytes = canonicalState(state);
+    const committedDay = state.committedDay;
+    const movement = state.prng;
+    const environment = state.navigation.environmentPrng;
+    const event = state.journey.eventPrng;
+
+    expect(() => applyCommand(state, { type: "observation_day" }, SHELF_STILL_ENVIRONMENT)).toThrow();
+
+    expect(canonicalState(state)).toBe(bytes);
+    expect(state.committedDay).toBe(committedDay);
+    expect(state.prng).toEqual(movement);
+    expect(state.navigation.environmentPrng).toEqual(environment);
+    expect(state.journey.eventPrng).toEqual(event);
+  });
+});
 
 describe("WP3 version compatibility and preserved fixtures", () => {
   it("reads canonical v1, v2, and v3 saves while writing explicit v4 saves", () => {
