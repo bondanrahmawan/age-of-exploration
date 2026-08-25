@@ -9,6 +9,7 @@ import {
   CONTENT_VERSION,
   HEALTH_PATH,
   LAUNCHER_PROTOCOL,
+  browserOpenerCommand,
   hashRelativeFiles,
   listenGameServer,
   probeLauncher,
@@ -170,4 +171,22 @@ test("build fingerprints and manifests are deterministic and sensitive to inputs
     buildId: first,
     lockHash: "e".repeat(64),
   });
+});
+
+// The launcher opened nothing for months and said nothing about it, because the
+// obvious way to open a URL on Windows is the one way that does not work: `cmd
+// /c start "" <url>` opens no browser here, never exits, and leaves the shell
+// running. This does not prove the opener works - only a real desktop can - but
+// it does stop anyone quietly putting `start` back.
+test("the browser opener is the shell URL handler, not cmd start", () => {
+  const opener = browserOpenerCommand("http://127.0.0.1:4173/");
+  assert.equal(opener.command, "rundll32.exe");
+  assert.deepEqual(opener.arguments_, [
+    "url.dll,FileProtocolHandler",
+    "http://127.0.0.1:4173/",
+  ]);
+  assert.ok(
+    !opener.command.includes("cmd") && !opener.arguments_.some((value) => value.includes("start")),
+    "cmd start hangs on this platform and opens nothing",
+  );
 });

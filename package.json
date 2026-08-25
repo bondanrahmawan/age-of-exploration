@@ -24,6 +24,7 @@
     "build:engine": "tsc -p tsconfig.build.json",
     "build:app": "vite build",
     "chart:wp1": "pnpm build:engine && node scripts/generate-wp1-chart.mjs",
+    "icon": "node scripts/make-icon.mjs",
     "event:validate": "pnpm build:engine && node scripts/validate-event-catalogue.mjs",
     "fixture:wp3": "pnpm build:engine && node scripts/generate-wp3-fixture.mjs",
     "fixture:wp4": "pnpm build:engine && node scripts/generate-wp4-fixture.mjs",
@@ -31,7 +32,8 @@
     "test:ui": "vitest run test/ui-controller.test.ts test/ui-components.test.tsx --reporter=verbose",
     "test:e2e": "playwright test",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.app.json --noEmit",
-    "test": "vitest run && node --test scripts/play.test.mjs",
+    "test": "vitest run && node --test scripts/play.test.mjs scripts/make-icon.test.mjs",
+    "test:icon": "node --test scripts/make-icon.test.mjs",
     "test:launcher": "node --test scripts/play.test.mjs",
     "test:determinism": "vitest run test/determinism.test.ts test/navigation-determinism.test.ts test/survival-determinism.test.ts test/journey-determinism.test.ts test/campaign-determinism.test.ts --reporter=verbose"
   },
