@@ -11,6 +11,7 @@ import {
   SURVIVAL_TUNING,
   eastWestObservationRefusal,
   lisbonOutfittingCost,
+  pointOfSailForHeading,
   type AfterActionReport,
   type CampaignFact,
   type CampaignPlayerView,
@@ -21,6 +22,8 @@ import {
   type Heading,
   type JourneyDayActivityResult,
   type ObservationHistoryPoint,
+  type ObservedWind,
+  type PointOfSailResult,
   type JourneyPlayerView,
   type RationPolicy,
   type SailingPolicy,
@@ -108,6 +111,61 @@ export interface ChartLandmarkViewModel {
   readonly status: string;
 }
 
+/**
+ * How the standing heading sits against the wind the crew last observed. The engine already
+ * decides this with `pointOfSailForHeading`, but until now it only showed up as a speed the
+ * player could not see coming, so the same pure function is read here to say it out loud.
+ */
+export type SailQuality = "becalmed" | "beating" | "close" | "reaching" | "running";
+
+export interface PointOfSailViewModel {
+  readonly quality: SailQuality;
+  readonly label: string;
+  readonly note: string;
+  readonly speedPermille: number;
+}
+
+export interface ObservedWindViewModel {
+  readonly fromHeading: Heading | null;
+  readonly strength: ObservedWind["strength"];
+  /** Plain sentence kept for readouts and screen readers: "moderate wind from NE". */
+  readonly text: string;
+}
+
+const SAIL_DESCRIPTIONS: Readonly<Record<PointOfSailResult["kind"], Omit<PointOfSailViewModel, "speedPermille">>> = {
+  calm: {
+    quality: "becalmed",
+    label: "Becalmed",
+    note: "No wind to work with. The ship makes no way whichever way she points.",
+  },
+  automatic_tacking: {
+    quality: "beating",
+    label: "Beating",
+    note: "Too near the wind to steer straight. The ship tacks back and forth at about a third of her pace, and the position estimate drifts faster while she does.",
+  },
+  close_hauled: {
+    quality: "close",
+    label: "Close-hauled",
+    note: "Hard on the wind. About half pace.",
+  },
+  beam_reach: {
+    quality: "reaching",
+    label: "Beam reach",
+    note: "Wind on the beam. Near full pace.",
+  },
+  running_broad: {
+    quality: "running",
+    label: "Running",
+    note: "Wind behind her. Full pace.",
+  },
+};
+
+/** Pure read of engine rules, so the rose can shade a heading before the day is spent. */
+export function pointOfSailFor(heading: Heading, windFromHeading: Heading | null): PointOfSailViewModel {
+  const resolved = pointOfSailForHeading(heading, windFromHeading);
+  return { ...SAIL_DESCRIPTIONS[resolved.kind], speedPermille: resolved.speedPermille };
+}
+
 export interface ChartViewModel {
   readonly estimatedPosition: ChartPointViewModel;
   readonly estimatedTrack: readonly ChartPointViewModel[];
@@ -116,6 +174,8 @@ export interface ChartViewModel {
   readonly heading: Heading;
   readonly knownLandmarks: readonly ChartLandmarkViewModel[];
   readonly observedWind: string;
+  readonly wind: ObservedWindViewModel;
+  readonly pointOfSail: PointOfSailViewModel;
   readonly knownCurrentStatements: readonly string[];
 }
 
@@ -135,6 +195,8 @@ export interface DeckViewModel {
   readonly warnings: readonly string[];
   readonly observedWeather: string;
   readonly observedWind: string;
+  readonly wind: ObservedWindViewModel;
+  readonly pointOfSail: PointOfSailViewModel;
   readonly heading: Heading;
   readonly sailingPolicy: SailingPolicy;
   readonly rationPolicy: RationPolicy;
@@ -644,6 +706,12 @@ function buildExpedition(
     `${titleCase(fact.id.replaceAll(".", " "))}: ${fact.status}, confidence ${fact.confidence}%. Claimed set ${kgToNm(fact.claimedVectorMnmPerDay.xMnm).toFixed(1)} nm east/west and ${kgToNm(fact.claimedVectorMnmPerDay.yMnm).toFixed(1)} nm north/south per day.`,
   ] : []);
   const observedWind = `${active.navigation.observedWind.strength} wind from ${active.navigation.observedWind.fromHeading ?? "variable"}`;
+  const wind: ObservedWindViewModel = {
+    fromHeading: active.navigation.observedWind.fromHeading,
+    strength: active.navigation.observedWind.strength,
+    text: observedWind,
+  };
+  const pointOfSail = pointOfSailFor(active.heading, wind.fromHeading);
   return {
     mission: missionProgress(active),
     record: recordStakes(deposit),
@@ -660,6 +728,8 @@ function buildExpedition(
       heading: active.heading,
       knownLandmarks,
       observedWind,
+      wind,
+      pointOfSail,
       knownCurrentStatements,
     },
     deck: {
@@ -678,6 +748,8 @@ function buildExpedition(
       warnings: active.survival.warnings.map((warning) => warning.message),
       observedWeather: titleCase(active.navigation.observedWeather),
       observedWind,
+      wind,
+      pointOfSail,
       heading: active.heading,
       sailingPolicy: active.sailingPolicy,
       rationPolicy: active.rationPolicy,

@@ -5,6 +5,7 @@ import type { GameActions } from "../controller.js";
 import type { AnimationMode, ExpeditionPanel, ExpeditionViewModel } from "../view-model.js";
 import { shipComponentCondition } from "../view-model.js";
 import { ActiveChart } from "./ActiveChart.js";
+import { HeadingRose } from "./CompassRose.js";
 import { SessionBriefing } from "./SessionBriefing.js";
 
 const titleCase = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -60,11 +61,12 @@ function DeckPanel({ model, controller }: { readonly model: ExpeditionViewModel;
         <div><dt>Location</dt><dd>{deck.location}</dd></div>
         <div><dt>Weather</dt><dd>{deck.observedWeather}</dd></div>
         <div><dt>Observed wind</dt><dd>{deck.observedWind}</dd></div>
-        <div><dt>Heading</dt><dd>{deck.heading}</dd></div>
+        <div><dt>Heading</dt><dd>{deck.heading} — {deck.pointOfSail.label}</dd></div>
         <div><dt>Sailing policy</dt><dd>{titleCase(deck.sailingPolicy)}</dd></div>
         <div><dt>Ration policy</dt><dd>{titleCase(deck.rationPolicy)}</dd></div>
         <div><dt>Expedition intent</dt><dd>{deck.expeditionIntent}</dd></div>
       </dl>
+      <p class="sail-note">{deck.pointOfSail.note}</p>
       {deck.warnings.length > 0 && <div class="warning-stack" aria-label="Active warnings">{deck.warnings.map((warning) => <p key={warning}>Warning: {warning}</p>)}</div>}
     </section>
   );
@@ -133,11 +135,14 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
             <p>Orders remain in force until you change them.</p>
           </div>
           <div class="order-grid">
-            <label>Heading
-              <select value={model.deck.heading} onChange={(event) => controller.setHeading(event.currentTarget.value as typeof model.deck.heading)}>
-                {model.headings.map((heading) => <option key={heading} value={heading}>{heading}</option>)}
-              </select>
-            </label>
+            <HeadingRose
+              heading={model.deck.heading}
+              wind={model.deck.wind}
+              pointOfSail={model.deck.pointOfSail}
+              headings={model.headings}
+              onSelect={(heading) => controller.setHeading(heading)}
+            />
+            <div class="order-fields">
             <label>Sailing policy
               <select value={model.deck.sailingPolicy} onChange={(event) => controller.setSailingPolicy(event.currentTarget.value as typeof model.deck.sailingPolicy)}>
                 {model.sailingPolicies.map((policy) => <option key={policy} value={policy}>{titleCase(policy)}</option>)}
@@ -155,6 +160,7 @@ export function ExpeditionScreen({ model, selectedPanel, animationMode, isAdvanc
                 <option value="objective_abandoned">Give up the Cape</option>
               </select>
             </label>
+            </div>
           </div>
           <div class="day-controls">
             <button class="primary primary-action" type="button" disabled={isAdvancing} onClick={() => void controller.advanceUntilInterrupted()}>

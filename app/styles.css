@@ -310,12 +310,13 @@ body { min-height: 0; }
 .expedition-screen { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: .3rem; }
 .expedition-workspace { margin-top: .35rem; }
 .expedition-workspace { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(300px, 335px) minmax(0, 1fr); gap: .5rem; }
-.command-rail { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: stretch; gap: .55rem; margin: 0; padding: .7rem; overflow: hidden; box-shadow: 0 10px 28px rgba(29,45,42,.1); }
+.command-rail { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: stretch; gap: .45rem; margin: 0; padding: .7rem; overflow: hidden; box-shadow: 0 10px 28px rgba(29,45,42,.1); }
 .order-heading h1 { margin: 0 0 .2rem; font-size: clamp(1.45rem, 2vw, 1.8rem); line-height: 1; }
 .order-heading p:last-child { margin: 0; color: var(--muted); font-size: .75rem; line-height: 1.25; }
-.order-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; }
-.order-grid label { min-width: 0; display: grid; gap: .22rem; font-size: .68rem; font-weight: 850; }
-.order-grid select { min-width: 0; width: 100%; padding: .48rem .5rem; border: 1px solid #8b9993; background: #fffdf7; color: var(--ink); }
+.order-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; align-items: stretch; }
+.order-fields { min-width: 0; display: grid; align-content: start; gap: .3rem; }
+.order-grid label { min-width: 0; display: grid; gap: .16rem; font-size: .68rem; font-weight: 850; }
+.order-grid select { min-width: 0; width: 100%; padding: .38rem .45rem; border: 1px solid #8b9993; background: #fffdf7; color: var(--ink); }
 .day-controls { flex: 0 0 auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; }
 .day-controls .primary-action { grid-column: 1 / -1; }
 .day-controls button { min-height: 42px; padding: .52rem .65rem; font-size: .76rem; }
@@ -323,7 +324,7 @@ body { min-height: 0; }
 .day-controls kbd { margin-left: .25rem; padding: .03rem .22rem; border: 1px solid currentColor; border-radius: 3px; font: inherit; }
 .observation-summary { flex: 0 0 auto; margin: 0; padding: .4rem .55rem; font-size: .7rem; line-height: 1.35; color: var(--ink); background: var(--paper-deep); border-left: 3px solid var(--teal); }
 .last-result { flex: 0 0 auto; margin-top: auto; max-height: 12rem; padding: .5rem .6rem; overflow: auto; overscroll-behavior: contain; color: var(--ink); background: var(--paper-deep); border-left: 3px solid var(--teal); }
-.record-rail { flex: 1 1 auto; min-height: 4.5rem; display: flex; flex-direction: column; margin-top: .15rem; padding: .5rem .6rem 0; overflow: auto; overscroll-behavior: contain; background: var(--paper-deep); border-left: 3px solid var(--teal); }
+.record-rail { flex: 1 1 auto; min-height: 3rem; display: flex; flex-direction: column; margin-top: .15rem; padding: .5rem .6rem 0; overflow: auto; overscroll-behavior: contain; background: var(--paper-deep); border-left: 3px solid var(--teal); }
 .record-rail > .eyebrow { position: sticky; z-index: 1; top: -.5rem; margin: -.5rem -.6rem .3rem; padding: .5rem .6rem .3rem; background: var(--paper-deep); font-size: .62rem; }
 .record-rail .empty-state { margin: 0; font-size: .72rem; }
 .record-list { list-style: none; display: grid; align-content: start; gap: .45rem; padding: 0 0 .5rem; margin: 0; }
@@ -333,6 +334,50 @@ body { min-height: 0; }
 .record-list li.record-latest span { color: #8a6626; }
 .record-list strong { font-size: .74rem; line-height: 1.25; }
 .record-list p { margin: 0; color: var(--muted); font-size: .7rem; line-height: 1.3; }
+
+
+/* --- Heading rose -------------------------------------------------------- */
+/* The heading control is a compass, not a list, because a heading only means something against
+   the wind: every wedge is shaded by the point of sail it would give, so the player can see the
+   slow water before steering into it. */
+.heading-rose { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; align-items: center; gap: .1rem; }
+/* Height 0 keeps the dial out of the row's intrinsic sizing, so the orders beside it set the row
+   height and the dial simply grows into whatever is left rather than pushing the log off-screen. */
+.rose-dial { flex: 1 1 auto; height: 0; min-height: 5rem; width: 100%; overflow: visible; touch-action: manipulation; }
+.rose-face { fill: #fffdf7; stroke: rgba(22,53,50,.22); stroke-width: 1; }
+.rose-point { cursor: pointer; outline: none; }
+.rose-wedge { stroke: rgba(22,53,50,.20); stroke-width: .8; transition: fill .14s ease; }
+.rose-wedge.quality-becalmed { fill: rgba(22,53,50,.10); }
+.rose-wedge.quality-beating { fill: rgba(166,79,53,.34); }
+.rose-wedge.quality-close { fill: rgba(185,139,61,.32); }
+.rose-wedge.quality-reaching { fill: rgba(47,120,117,.22); }
+.rose-wedge.quality-running { fill: rgba(47,120,117,.46); }
+.rose-point:hover .rose-wedge { fill: rgba(22,53,50,.42); }
+.rose-point[aria-checked="true"] .rose-wedge { stroke: var(--gold); stroke-width: 3; }
+.rose-point:focus-visible .rose-wedge { stroke: #f0b94f; stroke-width: 4; }
+.rose-furniture { pointer-events: none; }
+.rose-cardinal { fill: var(--muted); font: 850 15px/1 Inter, system-ui, sans-serif; letter-spacing: .04em; paint-order: stroke; stroke: var(--paper); stroke-width: 4px; stroke-linejoin: round; }
+.rose-course { stroke: var(--sea-deep); stroke-width: 3; stroke-linecap: round; }
+.rose-hub { fill: var(--paper); stroke: rgba(22,53,50,.26); stroke-width: 1.2; }
+.rose-heading { fill: var(--ink); font: 700 34px/1 Georgia, "Times New Roman", serif; }
+.rose-heading.rose-preview { fill: var(--teal); }
+.rose-sail { fill: var(--muted); font: 800 13px/1 Inter, system-ui, sans-serif; }
+.rose-becalmed { fill: none; stroke: rgba(22,53,50,.3); stroke-width: 2; stroke-dasharray: 4 5; }
+.rose-readout { flex: 0 0 auto; margin: 0; color: var(--muted); font-size: .66rem; line-height: 1.25; text-align: center; }
+.rose-readout strong { color: var(--ink); }
+
+/* Wind is drawn the same way on the rose and on the chart: shaft along the line it travels,
+   head where it pushes the ship, feathers on the upwind tail counting its strength. */
+.wind-arrow > * { fill: none; stroke: var(--rust); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+/* Laid down first and wider, so the arrow stays legible where it crosses a shaded wedge. */
+/* Butt and bevel, against the round ends the ink uses. A halo is a wider copy of the same path, so
+   at the arrowhead its round join carried the paper 1.55 past the point the rust stops at, leaving a
+   pale nub sitting between the tip and the hub - visible whenever the wedge under it is dark. Cutting
+   the halo's ends square keeps the contrast along the shaft and stops it reaching past the arrow. */
+.wind-arrow > .wind-halo { stroke: var(--paper); stroke-width: 5.5; stroke-linecap: butt; stroke-linejoin: bevel; }
+.chart-label-wind { fill: var(--rust); font-weight: 850; }
+.legend-wind { width: 1.5rem; height: 0; border-top: 2px solid var(--rust); }
+.sail-note { margin: .6rem 0 0; padding: .45rem .6rem; color: var(--ink); font-size: .82rem; line-height: 1.4; background: var(--paper-deep); border-left: 3px solid var(--rust); }
 
 .last-result > span { color: var(--teal); }
 .last-result p { margin: 0; font-size: .72rem; line-height: 1.32; }
@@ -353,7 +398,10 @@ body { min-height: 0; }
 .chart-notes { grid-template-columns: repeat(3, minmax(0, 15rem)); justify-content: space-between; gap: .5rem 1.5rem; margin: 0; }
 .chart-notes div { min-width: 0; }
 .chart-notes dt { font-size: .6rem; }
-.chart-notes dd { overflow: hidden; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+/* Wrapped, not clipped. These read as labels, but "How she sails it" is a sentence explaining why a
+   heading costs speed, and one line of it ended at "The ship ta..." - the half that says what happens
+   was the half being thrown away. The row is auto-height, so the sea above gives up the lines. */
+.chart-notes dd { font-size: .72rem; overflow-wrap: anywhere; }
 .known-currents { max-height: 64px; margin: 0; padding: .4rem .6rem; overflow: auto; }
 .known-currents h3 { margin-bottom: .2rem; font-size: .82rem; }
 .known-currents p { margin: 0; font-size: .68rem; }
@@ -422,9 +470,10 @@ body { min-height: 0; }
   .order-heading .eyebrow { grid-column: 1 / -1; }
   .order-heading h1 { font-size: 1.25rem; }
   .order-heading p:last-child { font-size: .72rem; }
-  .order-grid { gap: .3rem; }
+  .order-grid { gap: .3rem .5rem; grid-template-columns: minmax(0, 8rem) minmax(0, 1fr); }
   .order-grid label { font-size: .68rem; }
   .order-grid select { padding: .38rem .42rem; }
+  .rose-dial { min-height: 6.5rem; }
   .day-controls button { min-height: 40px; padding: .4rem .35rem; font-size: .72rem; }
   .last-result { margin-top: 0; max-height: 8rem; padding: .35rem .45rem; }
   .record-rail { max-height: 6.5rem; padding: .35rem .45rem 0; }

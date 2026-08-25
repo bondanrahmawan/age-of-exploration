@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { RefObject } from "preact";
 import type { ChartLandmarkViewModel, ChartPointViewModel, ChartViewModel } from "../view-model.js";
+import { WindArrow, bearingFor, polar } from "./CompassRose.js";
 
 interface PlotBox {
   readonly width: number;
@@ -30,7 +31,11 @@ const NICE_STEPS_NM = [25, 50, 100, 200, 250, 500, 1_000, 2_000, 2_500, 5_000] a
 function chromeFor(box: PlotBox) {
   const tight = box.height < 340 || box.width < 620;
   return {
-    frame: tight ? 8 : 22,
+    // Blank paper outside the chart border, and nothing is drawn in it: the tick labels and the scale
+    // bar live inside, in the gutters below. It was wide enough to read as a mount around a smaller
+    // map. Enough is kept to hold the border clear of the panel's own padding, and the rest goes to
+    // the sea, which grows on every side because the gutters are measured in from this edge.
+    frame: tight ? 4 : 8,
     left: tight ? 34 : 62,
     right: tight ? 12 : 30,
     top: tight ? 12 : 30,
@@ -229,6 +234,18 @@ export function ActiveChart({ chart }: { readonly chart: ChartViewModel }) {
   const estimateX = transform.x(chart.estimatedPosition.xNm);
   const estimateY = transform.y(chart.estimatedPosition.yNm);
   const origin = chart.estimatedTrack[0];
+  const courseBearing = bearingFor(chart.heading);
+  const courseEnd = polar(estimateX, estimateY, 52, courseBearing);
+  const sternPoint = polar(estimateX, estimateY, 26, courseBearing + 180);
+  /** The label trails astern of the marker, pushed further the way the stern already lies. */
+  const sternLabel = {
+    x: sternPoint.x,
+    y: sternPoint.y + (sternPoint.y < estimateY ? -6 : 14),
+    anchor: Math.abs(sternPoint.x - estimateX) < 1 ? "middle" : sternPoint.x < estimateX ? "end" : "start",
+  };
+  const windLabel = chart.wind.fromHeading === null
+    ? { x: estimateX, y: estimateY }
+    : polar(estimateX, estimateY, 76, bearingFor(chart.wind.fromHeading));
   return (
     <section class="chart-shell" aria-label="Chart room: estimated Atlantic position">
       <div class="chart-pane" ref={pane}>
@@ -248,6 +265,8 @@ export function ActiveChart({ chart }: { readonly chart: ChartViewModel }) {
           <desc id="active-chart-svg-desc">
             The marker is the crew's estimate of where the ship is, not its true position. The dotted line is the
             estimated track and the hatched ellipse is the uncertainty around the estimate, not a coastline.
+            The plain arrow from the marker is the heading being steered; the feathered arrow is the observed wind,
+            drawn flying from the compass point it blows out of.
             Grid lines are ruled in nautical miles east–west and north–south. Known chart symbols have visible
             labels and can receive keyboard focus.
           </desc>
@@ -310,10 +329,23 @@ export function ActiveChart({ chart }: { readonly chart: ChartViewModel }) {
               </g>
             );
           })}
-          <line x1={estimateX} y1={estimateY} x2={estimateX + 46} y2={estimateY - 26} class="heading-line" marker-end="url(#heading-arrow)" />
-          <g tabIndex={0} role="img" aria-label={`Estimated position, heading ${chart.heading}`}>
+          <line x1={estimateX} y1={estimateY} x2={courseEnd.x} y2={courseEnd.y} class="heading-line" marker-end="url(#heading-arrow)" />
+          {chart.wind.fromHeading !== null && (
+            <g role="img" aria-label={`Observed wind: ${chart.wind.text}, giving a ${chart.pointOfSail.label.toLowerCase()} on the ${chart.heading} heading`}>
+              <WindArrow
+                cx={estimateX}
+                cy={estimateY}
+                fromBearing={bearingFor(chart.wind.fromHeading)}
+                strength={chart.wind.strength}
+                innerRadius={17}
+                outerRadius={62}
+              />
+              <text x={windLabel.x} y={windLabel.y} text-anchor="middle" class="chart-label chart-label-wind">Wind {chart.wind.fromHeading}</text>
+            </g>
+          )}
+          <g tabIndex={0} role="img" aria-label={`Estimated position, heading ${chart.heading}, ${chart.pointOfSail.label}`}>
             <circle cx={estimateX} cy={estimateY} r="9" class="estimated-position" />
-            <text x={estimateX + 52} y={estimateY - 30} class="chart-label chart-label-estimate">Estimate · {chart.heading}</text>
+            <text x={sternLabel.x} y={sternLabel.y} text-anchor={sternLabel.anchor} class="chart-label chart-label-estimate">Estimate · {chart.heading}</text>
           </g>
         </svg>
       </div>
@@ -323,11 +355,13 @@ export function ActiveChart({ chart }: { readonly chart: ChartViewModel }) {
         <span><i class="legend-area" /> Hatched uncertainty — how wrong the estimate may be, not a coastline</span>
         <span><i class="legend-square" /> Known landmark<span class="legend-detail"> with confidence label</span></span>
         <span><i class="legend-square off" /> Beyond this window<span class="legend-detail"> — pinned to the edge with its distance</span></span>
+        <span><i class="legend-wind" /> Wind arrow<span class="legend-detail"> — flying from the point it blows out of, feathered once for moderate and twice for strong</span></span>
       </div>
       <dl class="chart-notes">
         <div><dt>Estimated coordinates</dt><dd>{chart.estimatedPosition.xNm.toFixed(1)} nm E/W, {chart.estimatedPosition.yNm.toFixed(1)} nm N/S</dd></div>
         <div><dt>Observed wind</dt><dd>{chart.observedWind}</dd></div>
-        <div><dt>Planned heading</dt><dd>{chart.heading}</dd></div>
+        <div><dt>Planned heading</dt><dd>{chart.heading} — {chart.pointOfSail.label}</dd></div>
+        <div><dt>How she sails it</dt><dd>{chart.pointOfSail.note}</dd></div>
       </dl>
       {chart.knownCurrentStatements.length > 0 && (
         <div class="known-currents">

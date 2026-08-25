@@ -2,13 +2,14 @@
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AUTHORED_EVENTS, createCampaignFixtureState, executeCampaignCommand, executeForwardedSimulationCommand, serializeCampaignSave, type CampaignState } from "../src/index.js";
+import { AUTHORED_EVENTS, HEADINGS, createCampaignFixtureState, executeCampaignCommand, executeForwardedSimulationCommand, serializeCampaignSave, type CampaignState } from "../src/index.js";
 import { App } from "../app/App.js";
 import { AfterActionScreen } from "../app/components/AfterActionScreen.js";
 import { InterruptScreen } from "../app/components/InterruptScreen.js";
 import { GameController, type GameActions } from "../app/controller.js";
 import { FixedSeedSource } from "../app/seed.js";
 import { CAMPAIGN_SAVE_KEY, CampaignSaveRepository, MemoryKeyValueStorage, PreferenceRepository } from "../app/storage.js";
+import { pointOfSailFor } from "../app/view-model.js";
 import type { InterruptViewModel, RecordStakesViewModel, ReportViewModel } from "../app/view-model.js";
 import { CAMPAIGN_ROUTE_ENVIRONMENT, NO_MOVEMENT_ENVIRONMENT } from "./campaign-test-helpers.js";
 
@@ -101,11 +102,43 @@ describe("WP5 accessible product surfaces", () => {
     game.beginNewCampaign();
     game.outfitAndDepart({ waterKg: 20_000, provisionsKg: 16_000, repairStoresKg: 4_000, medicineKg: 0 });
     render(<App controller={game} />);
-    expect(within(screen.getByLabelText("Heading")).getAllByRole("option")).toHaveLength(16);
+    const rose = screen.getByRole("radiogroup", { name: "Heading" });
+    expect(within(rose).getAllByRole("radio")).toHaveLength(16);
     expect(within(screen.getByLabelText("Sailing policy")).getAllByRole("option")).toHaveLength(3);
     expect(within(screen.getByLabelText("Ration policy")).getAllByRole("option")).toHaveLength(4);
     fireEvent.keyDown(document, { key: "d" });
     expect(game.view().expedition?.deck.elapsedDays).toBe(1);
+  });
+
+  it("shades every compass point by the point of sail it would give, and steers to a chosen point", () => {
+    const game = controller();
+    game.beginNewCampaign();
+    game.outfitAndDepart({ waterKg: 20_000, provisionsKg: 16_000, repairStoresKg: 4_000, medicineKg: 0 });
+    render(<App controller={game} />);
+    const rose = screen.getByRole("radiogroup", { name: "Heading" });
+    const wind = game.view().expedition!.deck.wind;
+
+    for (const heading of HEADINGS) {
+      const expected = pointOfSailFor(heading, wind.fromHeading);
+      expect(within(rose).getByRole("radio", { name: `${heading} — ${expected.label}` })).toBeTruthy();
+    }
+
+    fireEvent.click(within(rose).getByRole("radio", { name: /^SW —/ }));
+    expect(game.view().expedition?.deck.heading).toBe("SW");
+    expect(within(rose).getByRole("radio", { name: /^SW —/ }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("turns the ship one compass point at a time from the keyboard", () => {
+    const game = controller();
+    game.beginNewCampaign();
+    game.outfitAndDepart({ waterKg: 20_000, provisionsKg: 16_000, repairStoresKg: 4_000, medicineKg: 0 });
+    render(<App controller={game} />);
+    const rose = screen.getByRole("radiogroup", { name: "Heading" });
+    const before = game.view().expedition!.deck.heading;
+    const clockwise = HEADINGS[(HEADINGS.indexOf(before) + 1) % HEADINGS.length];
+
+    fireEvent.keyDown(within(rose).getByRole("radio", { name: `${before} — ${pointOfSailFor(before, game.view().expedition!.deck.wind.fromHeading).label}` }), { key: "ArrowRight" });
+    expect(game.view().expedition?.deck.heading).toBe(clockwise);
   });
 
   it("renders every authored event choice as a native decision control, including disabled reasons", () => {
